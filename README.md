@@ -1,5 +1,5 @@
 
-## Executive Summary
+## Summary of `opt_mps_fiducial_state.py`
 
 This program implements a hybrid optimization algorithm for finding Nash equilibria in quantum games using Matrix Product State (MPS) representations. The algorithm is designed for 3-player quantum games where players share a tripartite quantum state and each player applies local unitaries to maximize their expected payoff.
 

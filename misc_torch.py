@@ -101,7 +101,7 @@ def mps_ungroup_legs(Psi, pipes):
 
 def mps_invert(Psi):
     np = Psi[0].ndim - 2
-    return [b.permute(*list(range(np)) + [-1, -2]) for b in Psi[::-1]]
+    return [b.permute(*list[int](range(np)) + [-1, -2]) for b in Psi[::-1]]
 
 def mps_2form(Psi, form='A'):
     """Puts an mps with an arbitrary # of legs into A or B-canonical form
@@ -314,7 +314,7 @@ def mps_overlap(psi1, psi2):
     N = torch.ones(1, 1, device=psi1[0].device, dtype=psi1[0].dtype)  # a ap
     L = len(psi1)
     for i in range(L):
-        N = torch.tensordot(N, torch.conj(psi1[i]), dims=(1, 1))  # a ap
+        N = torch.tensordot(N, torch.conj(psi1[i]), dims=([1], [1]))  # a ap
         N = torch.tensordot(N, psi2[i], dims=([0, 1], [1, 0]))  # ap a
         N = N.permute(1, 0)
     N = torch.trace(N)

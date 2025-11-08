@@ -1,3 +1,7 @@
+import os
+# Enable MPS fallback for unsupported operations (e.g., linalg_qr)
+os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+
 from misc_torch import *
 import numpy as np
 import pandas as pd
@@ -8,7 +12,6 @@ import torch.optim as optim
 from jaxtyping import Complex, Float
 from dataclasses import dataclass
 from tqdm import tqdm
-import os
 import wandb
 from datetime import datetime
 
@@ -50,7 +53,7 @@ def get_default_H(option: str = 'H', default_dtype: t.dtype = t.float64, device:
 @dataclass
 class DataConfig:
     default_dtype: t.dtype = t.float64
-    device: t.device = t.device('cuda' if t.cuda.is_available() else 'cpu')
+    device: t.device = t.device('mps') if t.backends.mps.is_available() else (t.device('cuda') if t.cuda.is_available() else t.device('cpu'))
     H = get_default_H(option='H', default_dtype=default_dtype, device=device)
     H_all_in_one = get_default_H(option='H_all_in_one', default_dtype=default_dtype, device=device)
     save_dir: str = 'nash_data'
@@ -79,7 +82,17 @@ class TrainerConfig:
 
 
 
-device = t.device('cuda' if t.cuda.is_available() else 'cpu')
+# Device selection: MPS (Apple Silicon GPU) > CUDA (NVIDIA GPU) > CPU
+# MPS fallback is enabled above for unsupported operations
+if t.backends.mps.is_available():
+    device = t.device('mps')
+    print("Using Apple Silicon GPU (MPS) with CPU fallback for unsupported ops")
+elif t.cuda.is_available():
+    device = t.device('cuda')
+    print("Using NVIDIA GPU (CUDA)")
+else:
+    device = t.device('cpu')
+    print("Using CPU")
 default_dtype = t.float64
 
 def get_random_near_id_unitary(eps=5e-2):

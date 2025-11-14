@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import List, Tuple, Dict, Any
 
 
-def get_default_H(option: str = 'H', default_dtype: t.dtype = t.float64, device: t.device = t.device('cuda' if t.cuda.is_available() else 'cpu')):
+def get_default_H(option: str = 'H', default_dtype: t.dtype = t.float32, device: t.device = t.device('cuda' if t.cuda.is_available() else ('mps' if t.backends.mps.is_available() else 'cpu'))):
     """
     Returns the default Hamiltonian for the 3-player quantum game (Prisoner's Dilemma variant).
 
@@ -52,8 +52,8 @@ def get_default_H(option: str = 'H', default_dtype: t.dtype = t.float64, device:
 
 @dataclass
 class DataConfig:
-    default_dtype: t.dtype = t.float64
-    device: t.device = t.device('mps') if t.backends.mps.is_available() else (t.device('cuda') if t.cuda.is_available() else t.device('cpu'))
+    default_dtype: t.dtype = t.float32
+    device: t.device = t.device('cuda') if t.cuda.is_available() else (t.device('mps') if t.backends.mps.is_available() else t.device('cpu'))
     H = get_default_H(option='H', default_dtype=default_dtype, device=device)
     H_all_in_one = get_default_H(option='H_all_in_one', default_dtype=default_dtype, device=device)
     save_dir: str = 'nash_data'
@@ -82,18 +82,18 @@ class TrainerConfig:
 
 
 
-# Device selection: MPS (Apple Silicon GPU) > CUDA (NVIDIA GPU) > CPU
+# Device selection: CUDA (NVIDIA GPU) > MPS (Apple Silicon GPU) > CPU
 # MPS fallback is enabled above for unsupported operations
-if t.backends.mps.is_available():
-    device = t.device('mps')
-    print("Using Apple Silicon GPU (MPS) with CPU fallback for unsupported ops")
-elif t.cuda.is_available():
+if t.cuda.is_available():
     device = t.device('cuda')
     print("Using NVIDIA GPU (CUDA)")
+elif t.backends.mps.is_available():
+    device = t.device('mps')
+    print("Using Apple Silicon GPU (MPS) with CPU fallback for unsupported ops")
 else:
     device = t.device('cpu')
     print("Using CPU")
-default_dtype = t.float64
+default_dtype = t.float32
 
 def get_random_near_id_unitary(eps=5e-2):
     """
@@ -108,7 +108,7 @@ def get_random_near_id_unitary(eps=5e-2):
     Implementation:
         U = (1 - ε²/2)I + ε·iσ_y where σ_y is Pauli-Y matrix
     """
-    return t.eye(2, dtype=default_dtype, device=device) * (1 - 1/2*eps**2) + eps * t.tensor([[0, 1], [-1, 0]], dtype=default_dtype, device=device)
+    return t.eye(2, dtype=default_dtype, device=device) * t.cos(eps) + t.sin(eps) * t.tensor([[0, 1], [-1, 0]], dtype=default_dtype, device=device)
     
 
 def get_state_from_tensors(A_list: list[t.Tensor], bc: str = 'PBC'):
@@ -330,6 +330,9 @@ def compute_energy(Psi: list[t.Tensor], H: t.Tensor):
 
     Note: Works for 3-site systems (not thermodynamic limit).
     """
+    if isinstance(H, list):
+        H = t.stack(H)
+        
     psi = get_state_from_tensors(Psi)
     coord_str = 'a1 a2 a3'
     coord_str_conj = 'b1 b2 b3'
@@ -419,7 +422,7 @@ def batch_compute_exploitability(Psi, H, num_samples: int = 1000):
 
     batch_E: Float[t.Tensor, "n_player n_sample"] = t.stack(batch_E)
     original_E = einops.repeat(compute_energy(Psi, H), "n_player -> n_player n_sample", n_sample=num_samples)
-    expl = t.clamp(batch_E - original_E, min=0).max(dim=1).values
+    expl = t.real(batch_E - original_E).max(dim=1).values
     return expl
 
 def compute_ent_params_from_state(state, option = 'I'):
@@ -474,14 +477,14 @@ def compute_ent_params_from_state(state, option = 'I'):
     I5 = t.abs(det3) ** 2
 
     if option == 'I':
-        return t.tensor([I1, I2, I3, I4, I5])
+        return t.stack([I1, I2, I3, I4, I5])
     elif option == 'J':
         J1 = 1/4 * (1 + I1 - I2 - I3 - 2 * t.sqrt(I5))
         J2 = 1/4 * (1 - I1 + I2 - I3 - 2 * t.sqrt(I5))
         J3 = 1/4 * (1 - I1 - I2 + I3 - 2 * t.sqrt(I5))
         J4 = t.sqrt(I5)
         J5 = 1/4 * (3 - 3 * I1 - 3 * I2 - I3 + 4 * I4 - 2 * t.sqrt(I5))
-        return t.tensor([J1, J2, J3, J4, J5])
+        return t.stack([J1, J2, J3, J4, J5])
     else:
         raise ValueError("Invalid option")
     

@@ -1,0 +1,20 @@
+=========================================================
+Job submitted date = Sun 16 Nov 16:41:19 GMT 2025
+1 nodes ( 1 processes per node )
+1 hosts used: sondhigpu
+Job output begins
+-----------------
+
+Using NVIDIA GPU (CUDA)
+Warning: canonicalized state may have different bond dimensions from specified
+Traceback (most recent call last):
+  File "/mnt/users/clin/workspace/nash/solver.py", line 294, in <module>
+    H = get_default_H(3)
+NameError: name 'get_default_H' is not defined
+srun: error: sondhigpu: task 0: Exited with exit code 1
+---------------
+Job output ends
+=========================================================
+PBS job: finished date = Sun 16 Nov 16:42:33 GMT 2025
+Total run time : 0 Hours 1 Minutes 11 Seconds
+=========================================================

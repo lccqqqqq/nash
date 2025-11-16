@@ -7,8 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This repository contains research code for computing Nash equilibria in quantum games using tensor network methods (Matrix Product States). The primary application is analyzing multi-player quantum Prisoner's Dilemma variants.
 
 **Key Technologies:**
-- PyTorch for tensor operations and automatic differentiation
-- NumPy for reference implementations
+- NumPy for MPS tensor operations (primary, avoids device-specific bugs)
+- PyTorch for optimization and automatic differentiation
 - MPI (via mpi4py) for distributed computing
 - Jupyter notebooks for interactive analysis and visualization
 - Weights & Biases (wandb) for experiment tracking
@@ -77,6 +77,20 @@ python test_misc_torch.py
   - `equilibrium_finding()`: Single Nash equilibrium search
   - `process_grid()`: Distributed computation with checkpoint saving
 
+**mps_utils.py & mps_utils_torch.py**
+- **`mps_utils.py`** (PRODUCTION): Pure NumPy implementation of MPS utilities
+  - Avoids Apple MPS backend bugs with complex number operations
+  - All operations run correctly on CPU
+  - Key functions: `to_canonical_form()`, `get_rand_mps()`, `to_comp_basis()`, `get_product_state()`, `get_ghz_state()`
+  - API uses `dtype: np.dtype` instead of `device` parameter
+- **`mps_utils_torch.py`** (DEPRECATED): Original PyTorch implementation
+  - Kept for reference only
+  - Has device management but suffers from MPS complex einsum bugs on Apple Silicon
+  - Do not use for production code
+
+**Important - MPS Backend Bug:**
+Apple's Metal Performance Shaders (MPS) backend has bugs with complex number operations in `torch.einsum` and related functions. When using `dtype=torch.complex64/128`, einsum contractions produce incorrect results on `device='mps'`. This is why `mps_utils.py` uses pure NumPy instead of PyTorch. If you need GPU acceleration with complex numbers, use CUDA devices, not MPS.
+
 ### Jupyter Notebooks
 
 **opt_fiducial_state.ipynb**
@@ -129,18 +143,16 @@ mpirun -n 8 python qpd3.py
 Results are saved as checkpoints in `qpd3_results_*` directories with per-worker files.
 
 **Device Selection:**
-The code automatically selects the best available device:
-- **Mac (Apple Silicon)**: Uses MPS (Metal Performance Shaders) for GPU acceleration
-- **Linux/Windows with NVIDIA GPU**: Uses CUDA
-- **Otherwise**: Falls back to CPU
+The codebase uses a **hybrid approach**:
+- **MPS operations (NumPy)**: Run on CPU to avoid complex number bugs
+  - All functions in `mps_utils.py` use NumPy
+  - No GPU acceleration, but correct results with complex dtypes
+- **Optimization (PyTorch)**: Can use GPU when available
+  - **Mac (Apple Silicon)**: Can use MPS for real-valued operations only
+  - **Linux/Windows with NVIDIA GPU**: Can use CUDA
+  - **Otherwise**: Falls back to CPU
 
-**Important for Mac users**: Apple's MPS backend doesn't support all PyTorch operations yet (e.g., `torch.linalg.qr`). The code automatically sets `PYTORCH_ENABLE_MPS_FALLBACK=1` to use CPU for unsupported operations. This provides partial GPU acceleration - most operations run on GPU, but some fall back to CPU.
-
-```python
-# Already configured in the code
-os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
-device = torch.device('mps') if torch.backends.mps.is_available() else torch.device('cpu')
-```
+**Important for Mac users**: The MPS utilities (`mps_utils.py`) run on CPU using NumPy. This avoids Apple's MPS backend bugs with complex `torch.einsum` operations. If you need GPU acceleration for MPS operations with complex numbers, use a CUDA-enabled machine instead of Apple Silicon.
 
 ## Key Concepts
 
@@ -173,13 +185,24 @@ The default 3-player quantum Prisoner's Dilemma uses diagonal payoff matrices st
 
 ## File Naming Conventions
 
-- `*_torch.py`: PyTorch implementations (active)
-- `*.py` (without suffix): NumPy implementations or standalone scripts
+- `mps_utils.py`: Pure NumPy MPS utilities (PRODUCTION)
+- `mps_utils_torch.py`: PyTorch MPS utilities (DEPRECATED - reference only)
+- `*_torch.py`: PyTorch implementations (e.g., `misc_torch.py`)
+- `*.py` (without suffix): Standalone scripts or NumPy implementations
 - `test_*.py`: Test files using pytest
 - Saved results: `qpd_opt_chi{χ}_lr{lr}_steps{N}_alpha{α}_expl{ε}_{timestamp}.pkl`
 
 ## Important Notes
 
+- **Use NumPy API for MPS utilities**: When calling functions from `mps_utils.py`, use NumPy dtypes (e.g., `dtype=np.complex64`) instead of PyTorch dtypes and device parameters. No `device` parameter is needed.
+  ```python
+  # Correct (NumPy API)
+  from mps_utils import get_rand_mps
+  Psi = get_rand_mps(L=3, chi=2, dtype=np.complex64, seed=42)
+
+  # Wrong (old PyTorch API - don't use)
+  Psi = get_rand_mps(L=3, chi=2, default_dtype=torch.complex64, device='mps')
+  ```
 - **Learning rate scaling**: For gradient ascent, scale lr ∝ χ² when changing bond dimension
 - **Nash solver can fail**: The differential BR dynamics may converge to local optima. The code attempts multiple random restarts (default: 20) and keeps the best result.
 - **Canonical form is critical**: Always convert MPS to canonical form before running Nash equilibrium solver for numerical stability

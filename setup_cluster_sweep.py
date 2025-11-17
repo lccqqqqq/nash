@@ -140,7 +140,7 @@ def main():
     try:
         with open(args.output, 'w') as f:
             for i in range(args.num_workers):
-                cmd = f"python run_sweep.py --sweep-id {sweep_id} --count {args.count_per_worker}"
+                cmd = f"/usr/bin/python3 run_sweep.py --sweep-id {sweep_id} --count {args.count_per_worker}"
                 if args.project != 'nash-equilibrium':
                     cmd += f" --project {args.project}"
                 if args.entity:

@@ -27,7 +27,7 @@ SWEEP_CONFIG = {
     },
     'parameters': {
         # State initialization
-        'chi': {'values': [2, 4, 6, 8]},
+        'chi': {'values': [2, 4, 6]},
 
         # Optimization parameters
         'eps': {
@@ -35,15 +35,15 @@ SWEEP_CONFIG = {
             'min': 0.001,
             'max': 0.1
         },
-        'num_perturbations': {'values': [3, 5, 10, 15]},
+        'num_perturbations': {'values': [3, 5, 10]},
 
         # Nash equilibrium subroutine
         'subroutine_lr': {
             'distribution': 'log_uniform_values',
             'min': 0.01,
-            'max': 0.1
+            'max': 0.6
         },
-        'subroutine_max_iter': {'values': [500, 1000, 2000]},
+        'subroutine_max_iter': {'value': 1000},
 
         # Fixed parameters
         'max_num_steps': {'value': 100},

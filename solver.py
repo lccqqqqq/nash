@@ -184,23 +184,47 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
 def estimate_gradient_ols(dX, dy, lam=0.0):
     """
     Estimate the gradient of a function f(x) by least squares.
-    dX: np.ndarray
-    dy: np.ndarray
-    lam: float
-    return: np.ndarray
+
+    Uses SVD-based least squares solver for robustness to singular/near-singular cases.
+    When the system is underdetermined (fewer samples than dimensions), returns the
+    minimum-norm solution.
+
+    Args:
+        dX: np.ndarray of shape (n_samples, n_dims) - Perturbation directions
+        dy: np.ndarray of shape (n_samples,) - Corresponding function changes
+        lam: float - Ridge regularization parameter (optional, default: 0.0)
+                     If > 0, uses normal equations with regularization instead of lstsq
+
+    Returns:
+        np.ndarray of shape (n_dims,) - Gradient estimate
     """
-    # Center perturbations around x0
-    
-    # Compute Gram matrix and RHS
-    A = dX.T @ dX               # (d, d)
-    b = dX.T @ dy                # (d,)
+    n_samples, n_dims = dX.shape
 
-    # Apply ridge regularization if lam > 0
+    # Check if we have enough samples (warn if underdetermined)
+    if n_samples < n_dims:
+        print(f"  Warning: Only {n_samples} valid samples for {n_dims}-dimensional gradient. "
+              f"Estimate may be unreliable.")
+
+    # Use regularized normal equations if lam > 0, otherwise use lstsq
     if lam > 0:
-        A = A + lam * np.eye(A.shape[0])
+        # Ridge regression: solve (dX.T @ dX + λI) @ g = dX.T @ dy
+        A = dX.T @ dX + lam * np.eye(n_dims)
+        b = dX.T @ dy
+        try:
+            g_hat = np.linalg.solve(A, b)
+        except np.linalg.LinAlgError:
+            # Should not happen with regularization, but fallback to lstsq
+            print("  Warning: Regularized solve failed. Falling back to lstsq.")
+            g_hat, residuals, rank, s = np.linalg.lstsq(dX, dy, rcond=None)
+    else:
+        # Direct least squares using SVD (robust to singular matrices)
+        g_hat, residuals, rank, s = np.linalg.lstsq(dX, dy, rcond=None)
 
-    # Solve for gradient estimate
-    g_hat = np.linalg.solve(A, b)
+        # Diagnostic: check if system is rank-deficient
+        if rank < min(n_samples, n_dims):
+            print(f"  Warning: Rank-deficient system (rank {rank}/{min(n_samples, n_dims)}). "
+                  f"Using minimum-norm solution.")
+
     return g_hat
 
 def update_state(Psi, S_grad_est_proj, lr, site):

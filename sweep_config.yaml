@@ -1,0 +1,53 @@
+program: solver.py
+method: bayes  # Options: grid, random, bayes
+metric:
+  name: welfare
+  goal: maximize
+
+parameters:
+  # State initialization
+  chi:
+    values: [2, 4, 6, 8]
+
+  # Optimization parameters
+  eps:
+    distribution: log_uniform_values
+    min: 0.001
+    max: 0.1
+
+  num_perturbations:
+    values: [3, 5, 10, 15]
+
+  # Nash equilibrium subroutine
+  subroutine_lr:
+    distribution: log_uniform_values
+    min: 0.01
+    max: 0.1
+
+  subroutine_max_iter:
+    values: [500, 1000, 2000]
+
+  # Fixed parameters
+  max_num_steps:
+    value: 100
+
+  num_players:
+    value: 3
+
+  use_wandb:
+    value: true
+
+  wandb_project:
+    value: nash-equilibrium
+
+  save_results:
+    value: true
+
+  save_dir:
+    value: data
+
+# Early termination configuration (optional)
+early_terminate:
+  type: hyperband
+  min_iter: 10
+  eta: 2

@@ -1,0 +1,45 @@
+# Simple W&B sweep configuration for quick testing
+# This runs a grid search over a small parameter space
+
+program: solver.py
+method: grid  # Grid search for exhaustive coverage of parameter space
+
+metric:
+  name: welfare
+  goal: maximize
+
+parameters:
+  # Small grid for testing
+  chi:
+    values: [2, 4]
+
+  eps:
+    values: [0.01, 0.02]
+
+  num_perturbations:
+    values: [5, 10]
+
+  # Fixed parameters
+  max_num_steps:
+    value: 50  # Shorter for quick testing
+
+  subroutine_lr:
+    value: 0.03
+
+  subroutine_max_iter:
+    value: 1000
+
+  num_players:
+    value: 3
+
+  use_wandb:
+    value: true
+
+  wandb_project:
+    value: nash-equilibrium-sweep
+
+  save_results:
+    value: true
+
+  save_dir:
+    value: data/sweeps

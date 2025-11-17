@@ -58,3 +58,9 @@ htmlcov/
 .coverage.*
 coverage.xml
 *.cover
+
+# Data outputs
+data/
+wandb/
+*.out
+*.sh

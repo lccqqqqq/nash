@@ -12,6 +12,9 @@ import math
 from scipy.optimize import differential_evolution
 import einops
 from jaxtyping import Float
+import pandas as pd
+import wandb
+import argparse
 
 from opt_mps_fiducial_state import apply_unitary
 from mps_utils import to_canonical_form, to_comp_basis, get_rand_mps, get_product_state, get_ghz_state, apply_random_unitaries, test_canonical_form
@@ -62,7 +65,7 @@ def find_nash_eq1(
     alpha: float = 0.01,
     convergence_threshold: float = 1e-6,
     expl_threshold: float = 1e-3,
-    use_tqdm: bool = True,
+    use_tqdm: bool = False,
     expl_check_interval: int = 3,
     return_history: bool = False,
 ):
@@ -202,7 +205,7 @@ def estimate_gradient_ols(dX, dy, lam=0.0):
 
 def update_state(Psi, S_grad_est_proj, lr, site):
     """Apply targeted, controlled perturbation to the state"""
-    
+
     Psi = to_canonical_form(Psi, form='B')
     if isinstance(Psi[0], t.Tensor):
         Psi = [p.numpy() for p in Psi]
@@ -226,8 +229,113 @@ def update_state(Psi, S_grad_est_proj, lr, site):
                 S, Vh, Psi[j+1],
                 'bond_r, bond_r chi_l, d_phys chi_l chi_r -> d_phys bond_r chi_r'
             )
-            
+
     return to_canonical_form(Psi, form='B')
+
+
+def compute_ent_params_from_state(state, option='I'):
+    """
+    Computes entanglement parameters characterizing the quantum state structure.
+
+    Args:
+        state: Quantum state of shape (2,2,2) or flattened (8,) as numpy array
+        option: Return 'I' invariants or 'J' parameters (default: 'I')
+
+    Returns:
+        np.ndarray: Entanglement parameters, shape (5,)
+
+    For option='I' (invariants):
+        - I1: Tr(ρ_1²) - Single-party purity for player 1
+        - I2: Tr(ρ_2²) - Single-party purity for player 2
+        - I3: Tr(ρ_3²) - Single-party purity for player 3
+        - I4: Tr((ρ_1 ⊗ ρ_2) ρ_12) - Two-party correlation measure
+        - I5: |det₃(ψ)|² - Three-party entanglement (generalized concurrence)
+
+    For option='J' (derived parameters):
+        - J1, J2, J3: Transformed purity measures
+        - J4: √I5 - Concurrence
+        - J5: Higher-order correlation measure
+
+    Implementation:
+        Computes reduced density matrices for all subsystems and uses
+        Levi-Civita tensor for determinant computation. Parameters are
+        entanglement monotones useful for classifying quantum correlations.
+    """
+    if state.ndim == 1:
+        state = state.reshape(2, 2, 2)
+
+    # Compute reduced density matrices
+    rho_1 = einops.einsum(state, state.conj(), 'x i j, y i j -> x y')
+    rho_2 = einops.einsum(state, state.conj(), 'i x j, i y j -> x y')
+    rho_3 = einops.einsum(state, state.conj(), 'i j x, i j y -> x y')
+    rho_12 = einops.einsum(state, state.conj(), 'x1 x2 i, y1 y2 i -> x1 y1 x2 y2')
+    rho_12 = einops.rearrange(rho_12, 'x1 y1 x2 y2 -> (x1 x2) (y1 y2)')
+
+    # Compute invariants
+    I1 = np.trace(np.linalg.matrix_power(rho_1, 2))
+    I2 = np.trace(np.linalg.matrix_power(rho_2, 2))
+    I3 = np.trace(np.linalg.matrix_power(rho_3, 2))
+    I4 = np.trace(np.kron(rho_1, rho_2) @ rho_12)
+
+    # Compute 3-party entanglement using Levi-Civita tensor
+    eps = np.array([[0, 1], [-1, 0]], dtype=state.dtype)
+    det3 = 1/2 * einops.einsum(
+        eps, eps, eps, eps, eps, eps, state, state, state, state,
+        'i1 j1, i2 j2, k1 l1, k2 l2, i3 k3, j3 l3, i1 i2 i3, j1 j2 j3, k1 k2 k3, l1 l2 l3 ->'
+    )
+    I5 = np.abs(det3) ** 2
+
+    if option == 'I':
+        return np.stack([I1, I2, I3, I4, I5])
+    elif option == 'J':
+        J1 = 1/4 * (1 + I1 - I2 - I3 - 2 * np.sqrt(I5))
+        J2 = 1/4 * (1 - I1 + I2 - I3 - 2 * np.sqrt(I5))
+        J3 = 1/4 * (1 - I1 - I2 + I3 - 2 * np.sqrt(I5))
+        J4 = np.sqrt(I5)
+        J5 = 1/4 * (3 - 3 * I1 - 3 * I2 - I3 + 4 * I4 - 2 * np.sqrt(I5))
+        return np.stack([J1, J2, J3, J4, J5])
+    else:
+        raise ValueError("Invalid option")
+
+
+def metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=True):
+    """
+    Convert metric_logs list to a pandas DataFrame.
+
+    Args:
+        metric_logs: List of dictionaries with keys 'energy', 'welfare', 'state', 'ent_params'
+        include_state: If True, include the state column (not recommended for large datasets)
+        include_ent_params: If True, include entanglement parameter columns (default: True)
+
+    Returns:
+        pd.DataFrame with columns for each player's energy, welfare, entanglement params, and optionally state
+    """
+    if len(metric_logs) == 0:
+        return pd.DataFrame()
+
+    # Extract data
+    data = {
+        'welfare': [log['welfare'] for log in metric_logs],
+    }
+
+    # Add per-player energy columns
+    num_players = len(metric_logs[0]['energy'])
+    for i in range(num_players):
+        data[f'energy_player_{i}'] = [log['energy'][i] for log in metric_logs]
+
+    # Add entanglement parameters if available and requested
+    if include_ent_params and 'ent_params' in metric_logs[0]:
+        for i in range(5):  # I1, I2, I3, I4, I5
+            data[f'I{i+1}'] = [log['ent_params'][i] for log in metric_logs]
+
+    # Optionally include state (as a column of arrays)
+    if include_state:
+        data['state'] = [log['state'] for log in metric_logs]
+
+    df = pd.DataFrame(data)
+    df.index.name = 'iteration'
+
+    return df
 
 
 
@@ -239,10 +347,40 @@ def opt_fid_state(
     num_perturbations: int = 10, # Number of perturbations to perform at each step to estimate the gradient
     subroutine_max_iter: int = 1000, # Max iter as in the equilibrium-finding subroutine
     subroutine_lr: float = 0.03, # Learning rate as in the equilibrium-finding subroutine
+    use_wandb: bool = False, # Whether to use wandb logging
+    wandb_project: str = "nash-equilibrium", # W&B project name
+    wandb_config: dict = None, # Additional wandb config
+    save_results: bool = True, # Whether to save results to file
+    save_dir: str = "data", # Directory to save results
 ):
     assert all(isinstance(Psi[i], np.ndarray) for i in range(len(Psi))), "Psi must be a list of numpy arrays"
     assert all(isinstance(H[i], np.ndarray) for i in range(len(H))), "H must be a list of numpy arrays"
-    
+
+    # Initialize wandb if requested
+    wandb_initialized_here = False
+    if use_wandb:
+        # Check if wandb is already initialized (e.g., by a sweep)
+        if wandb.run is None:
+            config = {
+                'max_num_steps': max_num_steps,
+                'eps': eps,
+                'num_perturbations': num_perturbations,
+                'subroutine_max_iter': subroutine_max_iter,
+                'subroutine_lr': subroutine_lr,
+                'chi': Psi[0].shape[1],  # Bond dimension
+                'L': len(Psi),  # Number of players
+            }
+            # Merge with additional config if provided
+            if wandb_config:
+                config.update(wandb_config)
+
+            wandb.init(project=wandb_project, config=config)
+            wandb_initialized_here = True
+        else:
+            # wandb already initialized (likely by sweep), just update config
+            if wandb_config:
+                wandb.config.update(wandb_config, allow_val_change=True)
+
     # Initialize: find the Nash equilibrium of the fiducial state
     Psi = to_canonical_form(Psi, form='B')
     baseline_result = find_nash_eq1(Psi, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
@@ -285,18 +423,191 @@ def opt_fid_state(
         Psi = to_canonical_form(baseline_result['state_'], form='B')
 
         # metric logs
-        metric_logs.append({
+        # Compute entanglement parameters
+        psi_comp = to_comp_basis(Psi).reshape([2] * len(Psi))
+        ent_params = compute_ent_params_from_state(psi_comp, option='I')
+
+        metrics = {
             'energy': baseline_result['energy'],
+            'welfare': np.sum(baseline_result['energy']).item(),
             'state': Psi,
-        })
-        
+            'ent_params': ent_params,
+        }
+        metric_logs.append(metrics)
+
+        # Log to wandb
+        if use_wandb:
+            wandb_metrics = {
+                'welfare': metrics['welfare'],
+                'ent_params/I1': ent_params[0].item() if hasattr(ent_params[0], 'item') else float(ent_params[0]),
+                'ent_params/I2': ent_params[1].item() if hasattr(ent_params[1], 'item') else float(ent_params[1]),
+                'ent_params/I3': ent_params[2].item() if hasattr(ent_params[2], 'item') else float(ent_params[2]),
+                'ent_params/I4': ent_params[3].item() if hasattr(ent_params[3], 'item') else float(ent_params[3]),
+                'ent_params/I5': ent_params[4].item() if hasattr(ent_params[4], 'item') else float(ent_params[4]),
+            }
+            # Log individual player energies
+            for player_idx, energy in enumerate(metrics['energy']):
+                wandb_metrics[f'energy/player_{player_idx}'] = energy
+
+            wandb.log(wandb_metrics, step=i)
+
+    # Finish wandb run (only if we initialized it here, not in a sweep)
+    if use_wandb and wandb_initialized_here:
+        wandb.finish()
+
+    # Save results to file
+    if save_results:
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Convert to DataFrame
+        df = metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=True)
+
+        # Generate filename with timestamp and parameters
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        chi = Psi[0].shape[1]
+        filename = (
+            f"opt_fid_state_"
+            f"chi{chi}_"
+            f"lr{eps:.0e}_"
+            f"steps{max_num_steps}_"
+            f"alpha{subroutine_lr:.0e}_"
+            f"{timestamp}.csv"
+        )
+        filepath = os.path.join(save_dir, filename)
+        df.to_csv(filepath)
+        print(f"Results saved to: {filepath}")
+
     return Psi, metric_logs
+
+def parse_args():
+    """Parse command line arguments for optimization."""
+
+    # ========== DEFAULT CONFIGURATION ==========
+    DEFAULTS = {
+        # State initialization
+        'chi': 4,
+        'num_players': 3,
+        'seed': None,
+
+        # Optimization parameters
+        'max_num_steps': 1000,
+        'eps': 0.01,
+        'num_perturbations': 5,
+
+        # Nash equilibrium subroutine
+        'subroutine_max_iter': 1000,
+        'subroutine_lr': 0.03,
+
+        # Logging and saving
+        'use_wandb': True,
+        'wandb_project': 'nash-equilibrium',
+        'wandb_experiment': 'default',
+        'save_results': True,
+        'save_dir': 'data',
+    }
+    # ===========================================
+
+    parser = argparse.ArgumentParser(
+        description='Optimize fiducial state for Nash equilibrium in quantum games',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+
+    # State initialization parameters
+    parser.add_argument('--chi', type=int, default=DEFAULTS['chi'],
+                        help='MPS bond dimension')
+    parser.add_argument('--num-players', type=int, default=DEFAULTS['num_players'],
+                        help='Number of players (L)')
+    parser.add_argument('--seed', type=int, default=DEFAULTS['seed'],
+                        help='Random seed for reproducibility')
+
+    # Optimization parameters
+    parser.add_argument('--max-num-steps', type=int, default=DEFAULTS['max_num_steps'],
+                        help='Number of optimization steps')
+    parser.add_argument('--eps', '--lr', type=float, default=DEFAULTS['eps'],
+                        help='Learning rate for fiducial state updates')
+    parser.add_argument('--num-perturbations', type=int, default=DEFAULTS['num_perturbations'],
+                        help='Number of perturbations per step for gradient estimation')
+
+    # Nash equilibrium subroutine parameters
+    parser.add_argument('--subroutine-max-iter', type=int, default=DEFAULTS['subroutine_max_iter'],
+                        help='Max iterations for Nash equilibrium finder')
+    parser.add_argument('--subroutine-lr', '--alpha', type=float, default=DEFAULTS['subroutine_lr'],
+                        help='Learning rate for Nash equilibrium finder')
+
+    # Logging and saving
+    parser.add_argument('--use-wandb', action='store_true', default=DEFAULTS['use_wandb'],
+                        help='Enable Weights & Biases logging')
+    parser.add_argument('--wandb-project', type=str, default=DEFAULTS['wandb_project'],
+                        help='W&B project name')
+    parser.add_argument('--wandb-experiment', type=str, default=DEFAULTS['wandb_experiment'],
+                        help='W&B experiment name/tag')
+    parser.add_argument('--save-results', action='store_true', default=DEFAULTS['save_results'],
+                        help='Save results to CSV file')
+    parser.add_argument('--no-save-results', dest='save_results', action='store_false',
+                        help='Disable saving results')
+    parser.add_argument('--save-dir', type=str, default=DEFAULTS['save_dir'],
+                        help='Directory to save results')
+
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    Psi = get_rand_mps(L=3, chi=4, d_phys=2)
-    H = get_default_H(num_players=3)
-    Psi, metric_logs = opt_fid_state(Psi, H, max_num_steps=100, eps=0.005, num_perturbations=10, subroutine_max_iter=1000, subroutine_lr=0.03)
-    print(metric_logs)
+    args = parse_args()
+
+    # Set random seed if provided
+    if args.seed is not None:
+        np.random.seed(args.seed)
+
+    # Initialize state and Hamiltonian
+    print(f"Initializing random MPS with L={args.num_players}, chi={args.chi}")
+    Psi = get_rand_mps(L=args.num_players, chi=args.chi, d_phys=2, seed=args.seed)
+    H = get_default_H(num_players=args.num_players)
+
+    # Prepare wandb config
+    wandb_config = {
+        'experiment': args.wandb_experiment,
+        'chi': args.chi,
+        'seed': args.seed,
+    }
+
+    print(f"Starting optimization:")
+    print(f"  Steps: {args.max_num_steps}")
+    print(f"  Learning rate: {args.eps}")
+    print(f"  Perturbations: {args.num_perturbations}")
+    print(f"  Subroutine max iter: {args.subroutine_max_iter}")
+    print(f"  Subroutine LR: {args.subroutine_lr}")
+    print(f"  W&B logging: {args.use_wandb}")
+    print(f"  Save results: {args.save_results}")
+
+    # Run optimization
+    Psi, metric_logs = opt_fid_state(
+        Psi, H,
+        max_num_steps=args.max_num_steps,
+        eps=args.eps,
+        num_perturbations=args.num_perturbations,
+        subroutine_max_iter=args.subroutine_max_iter,
+        subroutine_lr=args.subroutine_lr,
+        use_wandb=args.use_wandb,
+        wandb_project=args.wandb_project,
+        wandb_config=wandb_config,
+        save_results=args.save_results,
+        save_dir=args.save_dir
+    )
+
+    # Display summary
+    df = metrics_to_dataframe(metric_logs, include_state=False)
+    print("\n" + "="*50)
+    print("Optimization Summary")
+    print("="*50)
+    print(f"\nFinal welfare: {df['welfare'].iloc[-1]:.4f}")
+    print(f"Best welfare: {df['welfare'].max():.4f}")
+    print(f"\nFinal entanglement parameters:")
+    for i in range(5):
+        print(f"  I{i+1}: {df[f'I{i+1}'].iloc[-1]:.6f}")
+    print("\nFirst 5 iterations:")
+    print(df.head())
+    print("\nLast 5 iterations:")
+    print(df.tail())
 
 

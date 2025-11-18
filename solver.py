@@ -15,6 +15,7 @@ from jaxtyping import Float
 import pandas as pd
 import wandb
 import argparse
+import pickle
 
 from opt_mps_fiducial_state import apply_unitary
 from mps_utils import to_canonical_form, to_comp_basis, get_rand_mps, get_product_state, get_ghz_state, apply_random_unitaries, test_canonical_form
@@ -483,24 +484,30 @@ def opt_fid_state(
     if save_results:
         os.makedirs(save_dir, exist_ok=True)
 
-        # Convert to DataFrame
-        df = metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=True)
-
-        # Generate filename with timestamp and parameters
+        # Generate base filename with timestamp and parameters
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         chi = Psi[0].shape[1]
-        filename = (
+        base_filename = (
             f"opt_fid_state_"
             f"chi{chi}_"
             f"lr{eps:.0e}_"
             f"steps{max_num_steps}_"
             f"alpha{subroutine_lr:.0e}_"
-            f"{timestamp}.csv"
+            f"{timestamp}"
         )
-        filepath = os.path.join(save_dir, filename)
-        df.to_csv(filepath)
-        print(f"Results saved to: {filepath}")
+
+        # Save metrics as CSV (without states, for easy analysis)
+        df = metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=True)
+        csv_filepath = os.path.join(save_dir, base_filename + ".csv")
+        df.to_csv(csv_filepath)
+        print(f"Metrics saved to: {csv_filepath}")
+
+        # Save full data including states as pickle (for complete recovery)
+        pickle_filepath = os.path.join(save_dir, base_filename + ".pkl")
+        with open(pickle_filepath, 'wb') as f:
+            pickle.dump(metric_logs, f)
+        print(f"Full data (with states) saved to: {pickle_filepath}")
 
     return Psi, metric_logs
 

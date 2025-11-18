@@ -1,7 +1,0 @@
-/usr/bin/python3 solver.py --eps 0.005 --wandb-experiment 8
-/usr/bin/python3 solver.py --eps 0.01 --wandb-experiment 8
-/usr/bin/python3 solver.py --eps 0.02 --wandb-experiment 8
-/usr/bin/python3 solver.py --eps 0.003 --wandb-experiment 9
-/usr/bin/python3 solver.py --eps 0.005 --wandb-experiment 9
-/usr/bin/python3 solver.py --eps 0.01 --wandb-experiment 9
-/usr/bin/python3 solver.py --eps 0.02 --wandb-experiment 9

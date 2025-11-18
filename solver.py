@@ -161,8 +161,7 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
         U, S, Vh = np.linalg.svd(psi_grouped, full_matrices=False)
         
         chi_l = psi.shape[2]  # Get chi_l for rearrange
-        Psi_batch[j] = einops.rearrange(U, 'batch (d_phys chi_l) chi_r -> batch d_phys chi_l chi_r', 
-                                         d_phys=d_phys, chi_l=chi_l)
+        Psi_batch[j] = einops.rearrange(U, 'batch (d_phys chi_l) chi_r -> batch d_phys chi_l chi_r', d_phys=d_phys, chi_l=chi_l)
         
         if j < len(Psi_batch) - 1:
             # Now we only perturb the singular values at one particular bond according to the function input

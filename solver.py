@@ -131,7 +131,19 @@ def find_nash_eq1(
 
     return result
 
+def perturb_state(Psi: list[t.Tensor] | list[np.ndarray], lr: float = 0.01, site: int = 0):
+    """
+    Perturb the state by left-canonicalizing and then fiddle with the singular values at each step.
 
+    Some overhead as we are reusing the batch_perturb function.
+    """
+    if isinstance(Psi[0], t.Tensor):
+        Psi = [p.cpu().numpy() for p in Psi]
+    else:
+        Psi = Psi
+    Psi_batch, original_S, batch_perturbed_S = batch_perturb(Psi, batch_size=1, lr=lr, site=site)
+    new_Psi = [Psi_batch[i][0] for i in range(len(Psi_batch))]
+    return new_Psi, original_S, batch_perturbed_S
 
 def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100, lr: float = 0.01, site: int = 0):
     """

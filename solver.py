@@ -21,6 +21,20 @@ from opt_mps_fiducial_state import apply_unitary
 from mps_utils import to_canonical_form, to_comp_basis, get_rand_mps, get_product_state, get_ghz_state, apply_random_unitaries, test_canonical_form
 from IPython.display import HTML, display
 from game import get_default_3players, get_default_2players, get_default_H
+import sys
+
+
+# Pre-computed Pauli matrices and tensor products for unitary perturbations
+PAULIS = [
+    np.array([[0, 1], [1, 0]], dtype=np.complex128),      # σ_x
+    np.array([[0, -1j], [1j, 0]], dtype=np.complex128),   # σ_y
+    np.array([[1, 0], [0, -1]], dtype=np.complex128)      # σ_z
+]
+
+PAULI_TENSORS_2Q = np.array([
+    np.kron(PAULIS[i], PAULIS[j])
+    for i in range(3) for j in range(3)
+])  # Shape: (9, 4, 4)
 
 
 # Functions that compute the Nash equilibrium (using a local algorithm) and verify by computing the exploitability with differential evolution. This is doable because we are dealing with a small parameter space, and considering deviation only in the exp(iY) direction.
@@ -131,67 +145,156 @@ def find_nash_eq1(
 
     return result
 
-def perturb_state(Psi: list[t.Tensor] | list[np.ndarray], lr: float = 0.01, site: int = 0):
+def perturb_state(Psi: list[t.Tensor] | list[np.ndarray], lr: float = 0.01, site: int = 0, method: str = 'schmidt'):
     """
-    Perturb the state by left-canonicalizing and then fiddle with the singular values at each step.
+    Perturb the state using one of two methods:
+
+    - 'schmidt': Left-canonicalize and perturb singular values at specified bond
+    - 'unitary': Apply random two-site unitary via Cayley transform
 
     Some overhead as we are reusing the batch_perturb function.
+
+    Returns:
+        For 'schmidt': (new_Psi, original_S, batch_perturbed_S)
+        For 'unitary': (new_Psi, original_coefs, batch_coefs)
     """
     if isinstance(Psi[0], t.Tensor):
         Psi = [p.cpu().numpy() for p in Psi]
     else:
         Psi = Psi
-    Psi_batch, original_S, batch_perturbed_S = batch_perturb(Psi, batch_size=1, lr=lr, site=site)
+    Psi_batch, original_param, batch_perturbed_param = batch_perturb(Psi, batch_size=1, lr=lr, site=site, method=method)
     new_Psi = [Psi_batch[i][0] for i in range(len(Psi_batch))]
-    return new_Psi, original_S, batch_perturbed_S
+    return new_Psi, original_param, batch_perturbed_param
 
-def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100, lr: float = 0.01, site: int = 0):
+def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100, lr: float = 0.01, site: int = 0, method: str = 'schmidt'):
     """
-    Assuming that the input is in the right canonical form, perturb the state by 
-    left-canonicalizing and then fiddle with the singular values at each step.
-    Uses NumPy to avoid device-specific issues.
+    Perturb the MPS state using one of two methods:
+
+    - 'schmidt': Left-canonicalize and perturb singular values at specified bond (original method)
+    - 'unitary': Apply random two-site unitary via Cayley transform with Pauli coefficients
+
+    Args:
+        Psi: MPS state (list of tensors)
+        batch_size: Number of perturbed states to generate
+        lr: Learning rate (perturbation strength)
+        site: Site index where perturbation is applied
+        method: 'schmidt' or 'unitary'
+
+    Returns:
+        For 'schmidt': (Psi_batch, original_S, batch_perturbed_S)
+        For 'unitary': (Psi_batch, original_coefs, batch_coefs)
     """
     # Convert to numpy if needed
     if isinstance(Psi[0], t.Tensor):
         Psi_np = [p.cpu().numpy() for p in Psi]
     else:
         Psi_np = Psi
-    
-    d_phys = Psi_np[0].shape[0]
 
-    # First, repeat everything...
-    Psi_batch = [einops.repeat(psi, '... -> batch ...', batch=batch_size) for psi in Psi_np]
+    if method == 'schmidt':
+        # Original Schmidt value perturbation method
+        d_phys = Psi_np[0].shape[0]
 
-    # Track singular values from the perturbed site
-    original_S = None
-    batch_perturbed_S = None
+        # First, repeat everything...
+        Psi_batch = [einops.repeat(psi, '... -> batch ...', batch=batch_size) for psi in Psi_np]
 
-    psi = Psi_batch[0]
-    for j in range(len(Psi_batch)):
-        # left-canonicalize the state
-        psi_grouped = einops.rearrange(psi, 'batch d_phys chi_l chi_r -> batch (d_phys chi_l) chi_r')
-        U, S, Vh = np.linalg.svd(psi_grouped, full_matrices=False)
-        
-        chi_l = psi.shape[2]  # Get chi_l for rearrange
-        Psi_batch[j] = einops.rearrange(U, 'batch (d_phys chi_l) chi_r -> batch d_phys chi_l chi_r', d_phys=d_phys, chi_l=chi_l)
-        
-        if j < len(Psi_batch) - 1:
-            # Now we only perturb the singular values at one particular bond according to the function input
-            if j == site:
-                # Save original singular values before perturbation
-                original_S = S.copy()
-                
-                # Generate random perturbation using numpy
-                batch_perturbed_S = S + np.random.randn(*S.shape).astype(S.dtype) * lr
-                # Normalize
-                batch_perturbed_S /= np.sqrt(np.sum(batch_perturbed_S**2, axis=-1, keepdims=True))
+        # Track singular values from the perturbed site
+        original_S = None
+        batch_perturbed_S = None
 
-            psi = einops.einsum(
-                batch_perturbed_S if j == site else S, Vh, Psi_batch[j+1],
-                'batch bond_r, batch bond_r chi_l, batch d_phys chi_l chi_r -> batch d_phys bond_r chi_r'
-            )
+        psi = Psi_batch[0]
+        for j in range(len(Psi_batch)):
+            # left-canonicalize the state
+            psi_grouped = einops.rearrange(psi, 'batch d_phys chi_l chi_r -> batch (d_phys chi_l) chi_r')
+            U, S, Vh = np.linalg.svd(psi_grouped, full_matrices=False)
 
-    return Psi_batch, original_S, batch_perturbed_S
+            chi_l = psi.shape[2]  # Get chi_l for rearrange
+            Psi_batch[j] = einops.rearrange(U, 'batch (d_phys chi_l) chi_r -> batch d_phys chi_l chi_r', d_phys=d_phys, chi_l=chi_l)
+
+            if j < len(Psi_batch) - 1:
+                # Now we only perturb the singular values at one particular bond according to the function input
+                if j == site:
+                    # Save original singular values before perturbation
+                    original_S = S.copy()
+
+                    # Generate random perturbation using numpy
+                    batch_perturbed_S = S + np.random.randn(*S.shape).astype(S.dtype) * lr
+                    # Normalize
+                    batch_perturbed_S /= np.sqrt(np.sum(batch_perturbed_S**2, axis=-1, keepdims=True))
+
+                psi = einops.einsum(
+                    batch_perturbed_S if j == site else S, Vh, Psi_batch[j+1],
+                    'batch bond_r, batch bond_r chi_l, batch d_phys chi_l chi_r -> batch d_phys bond_r chi_r'
+                )
+
+        return Psi_batch, original_S, batch_perturbed_S
+
+    elif method == 'unitary':
+        # Two-site unitary perturbation method using Cayley transform
+        L = len(Psi_np)
+        site_next = site + 1 # Open boundary conditions
+        assert site_next < L, "Site next is out of bounds"
+
+        # Make a copy for the batch
+        Psi_batch = [einops.repeat(psi, '... -> batch ...', batch=batch_size) for psi in Psi_np]
+
+        # Group the two adjacent sites
+        psi_grouped = einops.einsum(
+            Psi_batch[site], Psi_batch[site_next],
+            'batch d1 chi_l chi_m, batch d2 chi_m chi_r -> batch d1 d2 chi_l chi_r'
+        )
+        psi_grouped = einops.rearrange(psi_grouped, 'batch d1 d2 chi_l chi_r -> batch (d1 d2) chi_l chi_r')
+
+        # Generate random Pauli coefficients (batch_size, 9)
+        coefs_batch = np.random.randn(batch_size, 9)
+        coefs_batch = coefs_batch / np.linalg.norm(coefs_batch, axis=1, keepdims=True)
+        original_coefs = np.zeros((batch_size, 9))  # For consistency with return signature # okay...
+
+        # Construct the anti-Hermitian generator: H_batch[b] = sum_k coefs[b,k] * PAULI_TENSORS_2Q[k]
+        H_batch = np.einsum('bk,kij->bij', coefs_batch, PAULI_TENSORS_2Q)
+
+        # Apply Cayley transform: U = (I + iλH/2) @ inv(I - iλH/2)
+        I4 = np.eye(4, dtype=np.complex128)
+        numerator = I4[None, :, :] + 1j * lr * H_batch / 2
+        denominator = I4[None, :, :] - 1j * lr * H_batch / 2
+        U_batch = numerator @ np.linalg.inv(denominator)
+
+        # Apply the unitary
+        psi_new_grouped = einops.einsum(
+            U_batch, psi_grouped,
+            'batch i j, batch j chi_l chi_r -> batch i chi_l chi_r'
+        )
+
+        psi_new_grouped = einops.rearrange(psi_new_grouped, 'batch (d1 d2) chi_l chi_r -> batch d1 d2 chi_l chi_r', d1=2, d2=2)
+        psi_new_grouped_2d = einops.rearrange(psi_new_grouped, 'batch d1 d2 chi_l chi_r -> batch (d1 chi_l) (d2 chi_r)')
+
+        # QR decomposition
+        # m, n = psi_new_grouped_2d.shape[1], psi_new_grouped_2d.shape[2]
+        # Q = np.zeros((batch_size, m, min(m, n)), dtype=psi_new_grouped_2d.dtype) # (batch (d1 chi_l) chi_m)
+        # R = np.zeros((batch_size, min(m, n), n), dtype=psi_new_grouped_2d.dtype) # (batch chi_m (d2 chi_r))
+
+        # for b in range(batch_size):
+        #     Q[b], R[b] = np.linalg.qr(psi_new_grouped_2d[b])
+
+        Q, R = np.linalg.qr(psi_new_grouped_2d)
+
+        # Reshape Q back to MPS tensor at site
+        Psi_batch[site] = einops.rearrange(
+            Q,
+            'batch (d chi_l) chi_m -> batch d chi_l chi_m',
+            d=2
+        )
+
+        # R goes to the next site
+        Psi_batch[site_next] = einops.rearrange(
+            R,
+            'batch chi_m (d chi_r) -> batch d chi_m chi_r',
+            d=2
+        )
+
+        return Psi_batch, original_coefs, coefs_batch
+
+    else:
+        raise ValueError(f"Unknown perturbation method: {method}. Must be 'schmidt' or 'unitary'.")
 
 def estimate_gradient_ols(dX, dy, lam=0.0):
     """
@@ -265,6 +368,78 @@ def update_state(Psi, S_grad_est_proj, lr, site):
                 S, Vh, Psi[j+1],
                 'bond_r, bond_r chi_l, d_phys chi_l chi_r -> d_phys bond_r chi_r'
             )
+
+    return to_canonical_form(Psi, form='B')
+
+
+def update_state_unitary(Psi, coef_grad_est, lr, site):
+    """
+    Apply targeted unitary update to the state using Pauli coefficient gradients.
+
+    Args:
+        Psi: MPS state (list of tensors)
+        coef_grad_est: Gradient estimate in Pauli coefficient space, shape (9,)
+        lr: Learning rate
+        site: Site index where update is applied
+
+    Returns:
+        Updated MPS state in canonical form 'B'
+    """
+    Psi = to_canonical_form(Psi, form='B')
+    if isinstance(Psi[0], t.Tensor):
+        Psi = [p.numpy() for p in Psi]
+
+    L = len(Psi)
+    site_next = (site + 1) % L  # Periodic boundary conditions
+
+    # Normalize the gradient to get update direction
+    coef_update = coef_grad_est / (np.linalg.norm(coef_grad_est) + 1e-10)
+
+    # Construct Hamiltonian from gradient direction
+    H = np.einsum('k,kij->ij', coef_update, PAULI_TENSORS_2Q)
+
+    # Apply Cayley transform with learning rate: U = (I + iλH/2) @ inv(I - iλH/2)
+    I4 = np.eye(4, dtype=np.complex128)
+    numerator = I4 + 1j * lr * H / 2
+    denominator = I4 - 1j * lr * H / 2
+    U = numerator @ np.linalg.inv(denominator)
+
+    # Group the two adjacent sites
+    psi_grouped = einops.einsum(
+        Psi[site], Psi[site_next],
+        'd1 chi_l chi_m, d2 chi_m chi_r -> d1 d2 chi_l chi_r'
+    )
+    psi_grouped = einops.rearrange(psi_grouped, 'd1 d2 chi_l chi_r -> (d1 d2) chi_l chi_r')
+
+    # Apply the unitary
+    psi_new_grouped = einops.einsum(
+        U, psi_grouped,
+        'i j, j chi_l chi_r -> i chi_l chi_r'
+    )
+    psi_new_grouped = einops.rearrange(psi_new_grouped, '(d1 d2) chi_l chi_r -> d1 d2 chi_l chi_r', d1=2, d2=2)
+
+    # Restore to canonical form via QR decomposition
+    psi_new_grouped_2d = einops.rearrange(
+        psi_new_grouped,
+        'd1 d2 chi_l chi_r -> (d1 chi_l) (d2 chi_r)'
+    )
+
+    Q, R = np.linalg.qr(psi_new_grouped_2d) 
+    # Now the dimensions are ((d1 chi_l) chi_m) and (chi_m (d2 chi_r))
+
+    # Reshape Q back to MPS tensor at site
+    Psi[site] = einops.rearrange(
+        Q,
+        '(d chi_l) chi_m -> d chi_l chi_m',
+        d=2
+    )
+
+    # R goes to the next site
+    Psi[site_next] = einops.rearrange(
+        R,
+        'chi_m (d chi_r) -> d chi_m chi_r',
+        d=2
+    )
 
     return to_canonical_form(Psi, form='B')
 
@@ -383,6 +558,7 @@ def opt_fid_state(
     num_perturbations: int = 10, # Number of perturbations to perform at each step to estimate the gradient
     subroutine_max_iter: int = 1000, # Max iter as in the equilibrium-finding subroutine
     subroutine_lr: float = 0.03, # Learning rate as in the equilibrium-finding subroutine
+    perturbation_method: str = 'schmidt', # Perturbation method: 'schmidt' or 'unitary'
     use_wandb: bool = False, # Whether to use wandb logging
     wandb_project: str = "nash-equilibrium", # W&B project name
     wandb_config: dict = None, # Additional wandb config
@@ -403,6 +579,7 @@ def opt_fid_state(
                 'num_perturbations': num_perturbations,
                 'subroutine_max_iter': subroutine_max_iter,
                 'subroutine_lr': subroutine_lr,
+                'perturbation_method': perturbation_method,
                 'chi': Psi[0].shape[1],  # Bond dimension
                 'L': len(Psi),  # Number of players
             }
@@ -426,35 +603,45 @@ def opt_fid_state(
     for i in tqdm(range(max_num_steps), desc="Optimizing fiducial state"):
         # perturb at specific site
         site = i % (len(Psi) - 1)
-        Psi_batch, original_S, batch_perturbed_S = batch_perturb(Psi, batch_size=num_perturbations, lr=eps, site=site)
+        Psi_batch, original_param, batch_perturbed_param = batch_perturb(
+            Psi, batch_size=num_perturbations, lr=eps, site=site, method=perturbation_method
+        )
 
         energy_diffs = []
-        valid_Ss_diffs = []
-        all_Ss_diffs = np.array(batch_perturbed_S) - np.array(original_S)
+        valid_param_diffs = []
+        all_param_diffs = np.array(batch_perturbed_param) - np.array(original_param)
 
         for j in range(num_perturbations):
             Psi_ = [psi[j] for psi in Psi_batch]
+            # print(f"Psi_ shape: {to_comp_basis(Psi_).shape}")
+            # sys.stdout.flush()
             result_ = find_nash_eq1(Psi_, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
             if result_['nash_equilibrium']:
                 # Now result_['energy'] is final energy array (3,) for 3 players
                 energy_diff = sum(result_['energy']) - sum(baseline_result['energy'])
                 energy_diffs.append(energy_diff)
-                valid_Ss_diffs.append(all_Ss_diffs[j])  # Only include successful perturbations
+                valid_param_diffs.append(all_param_diffs[j])  # Only include successful perturbations
 
         if len(energy_diffs) == 0:
             print(f"No Nash equilibrium found for any of the {num_perturbations} perturbations. Skipping update.")
             continue
 
         energy_diffs = np.array(energy_diffs)  # Shape: (num_successful,)
-        valid_Ss_diffs = np.stack(valid_Ss_diffs)  # Shape: (num_successful, bond_dim)
+        valid_param_diffs = np.stack(valid_param_diffs)  # Shape: (num_successful, param_dim)
 
-        grad_est = estimate_gradient_ols(valid_Ss_diffs, energy_diffs)  # Shape: (bond_dim,)
+        grad_est = estimate_gradient_ols(valid_param_diffs, energy_diffs)  # Shape: (param_dim,)
 
-        # Project gradient onto tangent space (orthogonal to current singular values)
-        grad_est_proj = grad_est - np.dot(grad_est, original_S[0]) * original_S[0] / np.linalg.norm(original_S[0])**2
+        # Update the state using appropriate method
+        if perturbation_method == 'schmidt':
+            # Project gradient onto tangent space (orthogonal to current singular values)
+            grad_est_proj = grad_est - np.dot(grad_est, original_param[0]) * original_param[0] / np.linalg.norm(original_param[0])**2
+            Psi = update_state(Psi, grad_est_proj, lr=eps, site=site)
+        elif perturbation_method == 'unitary':
+            # For unitary method, grad_est is in coefficient space - no projection needed
+            Psi = update_state_unitary(Psi, grad_est, lr=eps, site=site)
+        else:
+            raise ValueError(f"Unknown perturbation method: {perturbation_method}")
 
-        # Update the state
-        Psi = update_state(Psi, grad_est_proj, lr=eps, site=site)
         baseline_result = find_nash_eq1(Psi, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
         Psi = to_canonical_form(baseline_result['state_'], form='B')
 
@@ -474,12 +661,12 @@ def opt_fid_state(
         # Log to wandb
         if use_wandb:
             wandb_metrics = {
-                'welfare': metrics['welfare'],
-                'ent_params/I1': ent_params[0].item() if hasattr(ent_params[0], 'item') else float(ent_params[0]),
-                'ent_params/I2': ent_params[1].item() if hasattr(ent_params[1], 'item') else float(ent_params[1]),
-                'ent_params/I3': ent_params[2].item() if hasattr(ent_params[2], 'item') else float(ent_params[2]),
-                'ent_params/I4': ent_params[3].item() if hasattr(ent_params[3], 'item') else float(ent_params[3]),
-                'ent_params/I5': ent_params[4].item() if hasattr(ent_params[4], 'item') else float(ent_params[4]),
+                'welfare': np.real(metrics['welfare']),
+                'ent_params/I1': np.real(ent_params[0].item() if hasattr(ent_params[0], 'item') else float(ent_params[0])),
+                'ent_params/I2': np.real(ent_params[1].item() if hasattr(ent_params[1], 'item') else float(ent_params[1])),
+                'ent_params/I3': np.real(ent_params[2].item() if hasattr(ent_params[2], 'item') else float(ent_params[2])),
+                'ent_params/I4': np.real(ent_params[3].item() if hasattr(ent_params[3], 'item') else float(ent_params[3])),
+                'ent_params/I5': np.real(ent_params[4].item() if hasattr(ent_params[4], 'item') else float(ent_params[4])),
             }
             # Log individual player energies
             for player_idx, energy in enumerate(metrics['energy']):
@@ -505,6 +692,7 @@ def opt_fid_state(
             f"lr{eps:.0e}_"
             f"steps{max_num_steps}_"
             f"alpha{subroutine_lr:.0e}_"
+            f"method{perturbation_method}_"
             f"{timestamp}"
         )
 
@@ -535,11 +723,12 @@ def parse_args():
         # Optimization parameters
         'max_num_steps': 1000,
         'eps': 0.01,
-        'num_perturbations': 5,
+        'num_perturbations': 20,
+        'perturbation_method': 'unitary',
 
         # Nash equilibrium subroutine
         'subroutine_max_iter': 1000,
-        'subroutine_lr': 0.03,
+        'subroutine_lr': 0.009,
 
         # Logging and saving
         'use_wandb': True,
@@ -570,6 +759,9 @@ def parse_args():
                         help='Learning rate for fiducial state updates')
     parser.add_argument('--num-perturbations', type=int, default=DEFAULTS['num_perturbations'],
                         help='Number of perturbations per step for gradient estimation')
+    parser.add_argument('--perturbation-method', type=str, default=DEFAULTS['perturbation_method'],
+                        choices=['schmidt', 'unitary'],
+                        help='Perturbation method: schmidt (singular values) or unitary (Pauli coefficients)')
 
     # Nash equilibrium subroutine parameters
     parser.add_argument('--subroutine-max-iter', type=int, default=DEFAULTS['subroutine_max_iter'],
@@ -617,6 +809,7 @@ if __name__ == "__main__":
     print(f"  Steps: {args.max_num_steps}")
     print(f"  Learning rate: {args.eps}")
     print(f"  Perturbations: {args.num_perturbations}")
+    print(f"  Perturbation method: {args.perturbation_method}")
     print(f"  Subroutine max iter: {args.subroutine_max_iter}")
     print(f"  Subroutine LR: {args.subroutine_lr}")
     print(f"  W&B logging: {args.use_wandb}")
@@ -630,6 +823,7 @@ if __name__ == "__main__":
         num_perturbations=args.num_perturbations,
         subroutine_max_iter=args.subroutine_max_iter,
         subroutine_lr=args.subroutine_lr,
+        perturbation_method=args.perturbation_method,
         use_wandb=args.use_wandb,
         wandb_project=args.wandb_project,
         wandb_config=wandb_config,

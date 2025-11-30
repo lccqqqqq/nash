@@ -36,6 +36,7 @@ SWEEP_CONFIG = {
             'max': 0.1
         },
         'num_perturbations': {'values': [3, 5, 10]},
+        'perturbation_method': {'value': 'unitary'},
 
         # Nash equilibrium subroutine
         'subroutine_lr': {
@@ -92,6 +93,7 @@ def train_sweep():
             max_num_steps=config.get('max_num_steps', 100),
             eps=config.get('eps', 0.01),
             num_perturbations=config.get('num_perturbations', 10),
+            perturbation_method=config.get('perturbation_method', 'unitary'),
             subroutine_max_iter=config.get('subroutine_max_iter', 1000),
             subroutine_lr=config.get('subroutine_lr', 0.03),
             use_wandb=True,  # Always true for sweeps

@@ -7,7 +7,7 @@ metric:
 parameters:
   # State initialization
   chi:
-    values: [2, 4, 6]
+    values: [2, 4, 8]
 
   # Optimization parameters
   eps:
@@ -16,20 +16,20 @@ parameters:
     max: 0.1
 
   num_perturbations:
-    values: [3, 5, 10]
+    values: [9, 20, 40]
 
   # Nash equilibrium subroutine
   subroutine_lr:
     distribution: log_uniform_values
-    min: 0.06
-    max: 0.6
+    min: 0.006
+    max: 0.1
 
   subroutine_max_iter:
     value: 1000
 
   # Fixed parameters
   max_num_steps:
-    value: 100
+    value: 800
 
   num_players:
     value: 3

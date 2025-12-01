@@ -28,6 +28,7 @@ SWEEP_CONFIG = {
     'parameters': {
         # State initialization
         'chi': {'values': [2, 4, 6]},
+        'num_players': {'values': [3, 4]},  # Support both 3 and 4 player games
 
         # Optimization parameters
         'eps': {
@@ -48,7 +49,6 @@ SWEEP_CONFIG = {
 
         # Fixed parameters
         'max_num_steps': {'value': 100},
-        'num_players': {'value': 3},
     },
     'early_terminate': {
         'type': 'hyperband',

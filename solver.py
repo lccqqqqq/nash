@@ -444,37 +444,165 @@ def update_state_unitary(Psi, coef_grad_est, lr, site):
     return to_canonical_form(Psi, form='B')
 
 
+def compute_D(psi: np.ndarray, i: int, j: int):
+    """
+    Compute the D matrix determinant for a pair of qubits (4-qubit states only).
+
+    Helper function for 4-qubit SLOCC invariants.
+    Uses precomputed formulas for efficiency.
+
+    Args:
+        psi: 4-qubit state vector (16 elements)
+        i, j: Qubit pair indices (0-3)
+
+    Returns:
+        Determinant of the D matrix for qubits (i, j)
+    """
+    a = psi.flatten()
+
+    # Dispatch table for all 6 possible pairs
+    # Maps sorted (i,j) pairs to their corresponding D matrix computation
+    pair = tuple(sorted([i, j]))
+
+    if pair == (0, 1):  # xy
+        D = np.array([
+            [-a[1]*a[2] + a[0]*a[3], a[3]*a[4] - a[2]*a[5] - a[1]*a[6] + a[0]*a[7], -a[5]*a[6] + a[4]*a[7]],
+            [a[3]*a[8] - a[2]*a[9] - a[1]*a[10] + a[0]*a[11], a[7]*a[8] - a[6]*a[9] - a[5]*a[10] + a[4]*a[11] + a[3]*a[12] - a[2]*a[13] - a[1]*a[14] + a[0]*a[15], a[7]*a[12] - a[6]*a[13] - a[5]*a[14] + a[4]*a[15]],
+            [-a[9]*a[10] + a[8]*a[11], a[11]*a[12] - a[10]*a[13] - a[9]*a[14] + a[8]*a[15], -a[13]*a[14] + a[12]*a[15]]
+        ])
+    elif pair == (0, 2):  # xz
+        D = np.array([
+            [-a[1]*a[4] + a[0]*a[5], -a[3]*a[4] + a[2]*a[5] - a[1]*a[6] + a[0]*a[7], -a[3]*a[6] + a[2]*a[7]],
+            [a[5]*a[8] - a[4]*a[9] - a[1]*a[12] + a[0]*a[13], a[7]*a[8] - a[6]*a[9] + a[5]*a[10] - a[4]*a[11] - a[3]*a[12] + a[2]*a[13] - a[1]*a[14] + a[0]*a[15], a[7]*a[10] - a[6]*a[11] - a[3]*a[14] + a[2]*a[15]],
+            [-a[9]*a[12] + a[8]*a[13], -a[11]*a[12] + a[10]*a[13] - a[9]*a[14] + a[8]*a[15], -a[11]*a[14] + a[10]*a[15]]
+        ])
+    elif pair == (0, 3):  # xt
+        D = np.array([
+            [-a[2]*a[4] + a[0]*a[6], -a[3]*a[4] - a[2]*a[5] + a[1]*a[6] + a[0]*a[7], -a[3]*a[5] + a[1]*a[7]],
+            [a[6]*a[8] - a[4]*a[10] - a[2]*a[12] + a[0]*a[14], a[7]*a[8] + a[6]*a[9] - a[5]*a[10] - a[4]*a[11] - a[3]*a[12] - a[2]*a[13] + a[1]*a[14] + a[0]*a[15], a[7]*a[9] - a[5]*a[11] - a[3]*a[13] + a[1]*a[15]],
+            [-a[10]*a[12] + a[8]*a[14], -a[11]*a[12] - a[10]*a[13] + a[9]*a[14] + a[8]*a[15], -a[11]*a[13] + a[9]*a[15]]
+        ])
+    elif pair == (1, 2):  # yz
+        D = np.array([
+            [-a[1]*a[8] + a[0]*a[9], -a[3]*a[8] + a[2]*a[9] - a[1]*a[10] + a[0]*a[11], -a[3]*a[10] + a[2]*a[11]],
+            [-a[5]*a[8] + a[4]*a[9] - a[1]*a[12] + a[0]*a[13], -a[7]*a[8] + a[6]*a[9] - a[5]*a[10] + a[4]*a[11] - a[3]*a[12] + a[2]*a[13] - a[1]*a[14] + a[0]*a[15], -a[7]*a[10] + a[6]*a[11] - a[3]*a[14] + a[2]*a[15]],
+            [-a[5]*a[12] + a[4]*a[13], -a[7]*a[12] + a[6]*a[13] - a[5]*a[14] + a[4]*a[15], -a[7]*a[14] + a[6]*a[15]]
+        ])
+    elif pair == (1, 3):  # yt
+        D = np.array([
+            [-a[2]*a[8] + a[0]*a[10], -a[3]*a[8] - a[2]*a[9] + a[1]*a[10] + a[0]*a[11], -a[3]*a[9] + a[1]*a[11]],
+            [-a[6]*a[8] + a[4]*a[10] - a[2]*a[12] + a[0]*a[14], -a[7]*a[8] - a[6]*a[9] + a[5]*a[10] + a[4]*a[11] - a[3]*a[12] - a[2]*a[13] + a[1]*a[14] + a[0]*a[15], -a[7]*a[9] + a[5]*a[11] - a[3]*a[13] + a[1]*a[15]],
+            [-a[6]*a[12] + a[4]*a[14], -a[7]*a[12] - a[6]*a[13] + a[5]*a[14] + a[4]*a[15], -a[7]*a[13] + a[5]*a[15]]
+        ])
+    elif pair == (2, 3):  # zt
+        D = np.array([
+            [-a[4]*a[8] + a[0]*a[12], -a[5]*a[8] - a[4]*a[9] + a[1]*a[12] + a[0]*a[13], -a[5]*a[9] + a[1]*a[13]],
+            [-a[6]*a[8] - a[4]*a[10] + a[2]*a[12] + a[0]*a[14], -a[7]*a[8] - a[6]*a[9] - a[5]*a[10] - a[4]*a[11] + a[3]*a[12] + a[2]*a[13] + a[1]*a[14] + a[0]*a[15], -a[7]*a[9] - a[5]*a[11] + a[3]*a[13] + a[1]*a[15]],
+            [-a[6]*a[10] + a[2]*a[14], -a[7]*a[10] - a[6]*a[11] + a[3]*a[14] + a[2]*a[15], -a[7]*a[11] + a[3]*a[15]]
+        ])
+    else:
+        raise ValueError(f"Invalid qubit pair: ({i}, {j})")
+
+    return np.linalg.det(D)
+
+
+def compute_four_qubit_SLOCC_invariants(psi: np.ndarray):
+    """
+    Compute SLOCC (Stochastic Local Operations and Classical Communication) invariants
+    for 4-qubit states.
+
+    Args:
+        psi: 4-qubit state vector, shape (16,) or (2,2,2,2)
+
+    Returns:
+        tuple: (H, L, M, Dxt) - Four SLOCC invariants
+            - H: Hyperdeterminant (degree-4 polynomial invariant)
+            - L: Simple determinant of 4×4 reshaping
+            - M: Determinant of specific index permutation
+            - Dxt: D-invariant for qubits (0,3)
+
+    Reference:
+        These invariants characterize 4-qubit entanglement classes under SLOCC.
+    """
+    psi = psi.flatten()
+    assert psi.shape == (16,), f"Expected 16-element state vector, got shape {psi.shape}"
+
+    # Hyperdeterminant H
+    H = (psi[0] * psi[15] - psi[1] * psi[14] - psi[2] * psi[13] + psi[3] * psi[12] -
+         psi[4] * psi[11] + psi[5] * psi[10] + psi[6] * psi[9] - psi[7] * psi[8])
+
+    # Simple determinant L
+    L = np.linalg.det(psi.reshape(4, 4))
+
+    # Permuted determinant M
+    M = np.linalg.det([
+        [psi[0], psi[8], psi[2], psi[10]],
+        [psi[1], psi[9], psi[3], psi[11]],
+        [psi[4], psi[12], psi[6], psi[14]],
+        [psi[5], psi[13], psi[7], psi[15]],
+    ])
+
+    # D-invariant for qubits (0, 3) - x-t pair
+    Dxt = compute_D(psi, 0, 3)
+
+    return abs(H), abs(L), abs(M), abs(Dxt)
+
+
 def compute_ent_params_from_state(state, option='I'):
     """
     Computes entanglement parameters characterizing the quantum state structure.
 
     Args:
-        state: Quantum state of shape (2,2,2) or flattened (8,) as numpy array
+        state: Quantum state of shape (2,2,2) for 3 qubits or (2,2,2,2) for 4 qubits,
+               or flattened (8,) or (16,) as numpy array
         option: Return 'I' invariants or 'J' parameters (default: 'I')
+                Only applicable for 3-qubit states. 4-qubit states return SLOCC invariants.
 
     Returns:
-        np.ndarray: Entanglement parameters, shape (5,)
+        np.ndarray: Entanglement parameters
+            - For 3 qubits: shape (5,) with I1-I5 or J1-J5
+            - For 4 qubits: shape (4,) with (H, L, M, Dxt) SLOCC invariants
 
-    For option='I' (invariants):
+    For 3-qubit states with option='I' (invariants):
         - I1: Tr(ρ_1²) - Single-party purity for player 1
         - I2: Tr(ρ_2²) - Single-party purity for player 2
         - I3: Tr(ρ_3²) - Single-party purity for player 3
         - I4: Tr((ρ_1 ⊗ ρ_2) ρ_12) - Two-party correlation measure
         - I5: |det₃(ψ)|² - Three-party entanglement (generalized concurrence)
 
-    For option='J' (derived parameters):
+    For 3-qubit states with option='J' (derived parameters):
         - J1, J2, J3: Transformed purity measures
         - J4: √I5 - Concurrence
         - J5: Higher-order correlation measure
 
-    Implementation:
-        Computes reduced density matrices for all subsystems and uses
-        Levi-Civita tensor for determinant computation. Parameters are
-        entanglement monotones useful for classifying quantum correlations.
-    """
-    if state.ndim == 1:
-        state = state.reshape(2, 2, 2)
+    For 4-qubit states:
+        - H: Hyperdeterminant
+        - L: Simple determinant
+        - M: Permuted determinant
+        - Dxt: D-invariant for qubits (0,3)
 
+    Implementation:
+        For 3 qubits: Computes reduced density matrices for all subsystems and uses
+        Levi-Civita tensor for determinant computation.
+
+        For 4 qubits: Computes SLOCC invariants that classify entanglement under
+        stochastic local operations and classical communication.
+    """
+    # Detect number of qubits
+    if state.ndim == 1:
+        n_qubits = int(np.log2(len(state)))
+        if n_qubits == 4:
+            # 4-qubit case
+            return np.array(compute_four_qubit_SLOCC_invariants(state))
+        elif n_qubits == 3:
+            state = state.reshape(2, 2, 2)
+        else:
+            raise ValueError(f"Unsupported number of qubits: {n_qubits}. Only 3 or 4 qubits supported.")
+    elif state.shape == (2, 2, 2, 2):
+        # 4-qubit case
+        return np.array(compute_four_qubit_SLOCC_invariants(state))
+
+    # 3-qubit case continues below
     # Compute reduced density matrices
     rho_1 = einops.einsum(state, state.conj(), 'x i j, y i j -> x y')
     rho_2 = einops.einsum(state, state.conj(), 'i x j, i y j -> x y')
@@ -536,8 +664,20 @@ def metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=Tr
 
     # Add entanglement parameters if available and requested
     if include_ent_params and 'ent_params' in metric_logs[0]:
-        for i in range(5):  # I1, I2, I3, I4, I5
-            data[f'I{i+1}'] = [log['ent_params'][i] for log in metric_logs]
+        num_ent_params = len(metric_logs[0]['ent_params'])
+
+        if num_ent_params == 5:
+            # 3-qubit case: I1, I2, I3, I4, I5
+            param_names = ['I1', 'I2', 'I3', 'I4', 'I5']
+        elif num_ent_params == 4:
+            # 4-qubit case: H, L, M, Dxt
+            param_names = ['H', 'L', 'M', 'Dxt']
+        else:
+            # Generic fallback
+            param_names = [f'param_{i}' for i in range(num_ent_params)]
+
+        for i, name in enumerate(param_names):
+            data[name] = [log['ent_params'][i] for log in metric_logs]
 
     # Optionally include state (as a column of arrays)
     if include_state:
@@ -662,12 +802,23 @@ def opt_fid_state(
         if use_wandb:
             wandb_metrics = {
                 'welfare': np.real(metrics['welfare']),
-                'ent_params/I1': np.real(ent_params[0].item() if hasattr(ent_params[0], 'item') else float(ent_params[0])),
-                'ent_params/I2': np.real(ent_params[1].item() if hasattr(ent_params[1], 'item') else float(ent_params[1])),
-                'ent_params/I3': np.real(ent_params[2].item() if hasattr(ent_params[2], 'item') else float(ent_params[2])),
-                'ent_params/I4': np.real(ent_params[3].item() if hasattr(ent_params[3], 'item') else float(ent_params[3])),
-                'ent_params/I5': np.real(ent_params[4].item() if hasattr(ent_params[4], 'item') else float(ent_params[4])),
             }
+
+            # Add entanglement parameters with appropriate labels
+            if len(ent_params) == 5:
+                # 3-qubit case: I1, I2, I3, I4, I5
+                param_names = ['I1', 'I2', 'I3', 'I4', 'I5']
+            elif len(ent_params) == 4:
+                # 4-qubit case: H, L, M, Dxt
+                param_names = ['H', 'L', 'M', 'Dxt']
+            else:
+                # Generic fallback
+                param_names = [f'param_{i}' for i in range(len(ent_params))]
+
+            for i_param, name in enumerate(param_names):
+                value = ent_params[i_param]
+                wandb_metrics[f'ent_params/{name}'] = np.real(value.item() if hasattr(value, 'item') else float(value))
+
             # Log individual player energies
             for player_idx, energy in enumerate(metrics['energy']):
                 wandb_metrics[f'energy/player_{player_idx}'] = energy
@@ -839,8 +990,22 @@ if __name__ == "__main__":
     print(f"\nFinal welfare: {df['welfare'].iloc[-1]:.4f}")
     print(f"Best welfare: {df['welfare'].max():.4f}")
     print(f"\nFinal entanglement parameters:")
-    for i in range(5):
-        print(f"  I{i+1}: {df[f'I{i+1}'].iloc[-1]:.6f}")
+
+    # Detect parameter type from column names
+    if 'I1' in df.columns:
+        # 3-qubit case
+        param_names = ['I1', 'I2', 'I3', 'I4', 'I5']
+    elif 'H' in df.columns:
+        # 4-qubit case
+        param_names = ['H', 'L', 'M', 'Dxt']
+    else:
+        # Fallback: find all ent_param columns
+        param_names = [col for col in df.columns if col.startswith('param_')]
+
+    for name in param_names:
+        if name in df.columns:
+            print(f"  {name}: {df[name].iloc[-1]:.6f}")
+
     print("\nFirst 5 iterations:")
     print(df.head())
     print("\nLast 5 iterations:")

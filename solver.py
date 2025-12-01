@@ -740,7 +740,7 @@ def opt_fid_state(
     Psi = to_canonical_form(baseline_result['state_'], form='B')
 
     metric_logs = []
-    for i in tqdm(range(max_num_steps), desc="Optimizing fiducial state"):
+    for i in tqdm[int](range(max_num_steps), desc="Optimizing fiducial state"):
         # perturb at specific site
         site = i % (len(Psi) - 1)
         Psi_batch, original_param, batch_perturbed_param = batch_perturb(
@@ -762,8 +762,15 @@ def opt_fid_state(
                 energy_diffs.append(energy_diff)
                 valid_param_diffs.append(all_param_diffs[j])  # Only include successful perturbations
 
+        num_attempts = 0
         if len(energy_diffs) == 0:
-            print(f"No Nash equilibrium found for any of the {num_perturbations} perturbations. Skipping update.")
+            print(f"No Nash equilibrium found for any of the {num_perturbations} perturbations. Skipping update. Attempt {num_attempts + 1} of 4.")
+            num_attempts += 1
+            if num_attempts >= 4:
+                print(f"Too many failed attempts, kicking the state with products of random unitaries (so that we are on the same orbit)")
+                Psi = kick_with_u(Psi)
+                baseline_result = find_nash_eq1(Psi, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
+                Psi = to_canonical_form(baseline_result['state_'], form='B')
             continue
 
         energy_diffs = np.array(energy_diffs)  # Shape: (num_successful,)

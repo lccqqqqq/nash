@@ -74,7 +74,7 @@ def compute_exploitability(psi, H, player_idx):
     return -result.fun + uni_dev_payoff(np.array([0]))
 
 def find_nash_eq1(
-    Psi: list[np.ndarray],
+    Psi: list[np.ndarray] | np.ndarray, # allowing for both MPS and computational basis input
     H: list[np.ndarray],
     max_iter: int = 10000,
     alpha: float = 0.01,
@@ -85,12 +85,15 @@ def find_nash_eq1(
     return_history: bool = False,
 ):
     # Convert types to ndarray
-    if isinstance(Psi[0], t.Tensor):
+    if isinstance(Psi, list) and isinstance(Psi[0], t.Tensor):
         Psi = [p.cpu().numpy() for p in Psi]
     if isinstance(H[0], t.Tensor):
         H = [h.cpu().numpy() for h in H]
 
-    L = len(Psi)
+    if isinstance(Psi, list):
+        L = len(Psi)
+    else:
+        L = int(np.log2(Psi.shape[0]))
     Es = []
     psi_list = [] if return_history else None
     Psi_list = [] if return_history else None
@@ -98,7 +101,10 @@ def find_nash_eq1(
     global_converged = False
     expl_list = []
     for n in tqdm(range(max_iter), disable=not use_tqdm):
-        psi = to_comp_basis(Psi).reshape([2] * L)
+        if isinstance(Psi, list):
+            psi = to_comp_basis(Psi).reshape([2] * L)
+        else:
+            psi = Psi.reshape([2] * L)
         unitaries = []
         E = []
         for i in range(L):
@@ -117,7 +123,10 @@ def find_nash_eq1(
             Psi_list.append(Psi)
         for i in range(L):
             # Here the convention is made sure to be the same as in `apply_u`
-            Psi[i] = apply_unitary(unitaries[i].T, Psi[i])
+            if isinstance(Psi, list):
+                Psi[i] = apply_unitary(unitaries[i].T, Psi[i])
+            else:
+                Psi = reduce(np.kron, unitaries) @ Psi
         
         if n > 2 and not local_converged:
             local_converged = sum([abs(E[i] - Es[-2][i]) for i in range(L)]) < convergence_threshold
@@ -140,7 +149,7 @@ def find_nash_eq1(
         'state': psi_list if return_history else psi,
         'state_': Psi_list if return_history else Psi,
         'num_iters': n,
-        'expl': np.array(expl_list),
+        'expl': np.array(expl_list) if return_history else expl_list[-1],
     }
 
     return result

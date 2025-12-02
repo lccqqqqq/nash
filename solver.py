@@ -740,7 +740,7 @@ def opt_fid_state(
     Psi = to_canonical_form(baseline_result['state_'], form='B')
 
     metric_logs = []
-    for i in tqdm[int](range(max_num_steps), desc="Optimizing fiducial state"):
+    for i in tqdm(range(max_num_steps), desc="Optimizing fiducial state"):
         # perturb at specific site
         site = i % (len(Psi) - 1)
         Psi_batch, original_param, batch_perturbed_param = batch_perturb(

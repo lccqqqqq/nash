@@ -1,0 +1,265 @@
+Using CPU
+================================================================================
+LEARNING RATE SWEEP FOR 4-QUBIT NASH EQUILIBRIUM FINDER
+================================================================================
+
+Testing 8 learning rates × 10 seeds = 80 total runs
+Parameters: chi=16, max_iter=2000, expl_threshold=1e-3
+
+
+================================================================================
+Testing alpha = 0.0010
+================================================================================
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 100: ✗ NO (expl=4.16e-01)            iters=1999  welfare=8.0311
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 101: ✗ NO (expl=7.47e-01)            iters=1999  welfare=7.4134
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 102: ✗ NO (expl=5.08e-01)            iters=1999  welfare=8.4106
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 103: ✗ NO (expl=4.17e-01)            iters=1999  welfare=7.9389
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 104: ✗ NO (expl=1.21e+00)            iters=1999  welfare=7.9657
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 105: ✗ NO (expl=4.17e-01)            iters=1999  welfare=7.3999
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 106: ✗ NO (expl=3.06e+00)            iters=1999  welfare=10.2172
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 107: ✗ NO (expl=1.26e-01)            iters=1999  welfare=8.2881
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 108: ✗ NO (expl=7.31e-01)            iters=1999  welfare=8.2619
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 109: ✗ NO (expl=1.61e+00)            iters=1999  welfare=8.0288
+
+  Summary for alpha=0.0010:
+    Success rate: 0/10 (0.0%)
+    Best exploitability achieved: 1.26e-01
+
+================================================================================
+Testing alpha = 0.0030
+================================================================================
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 100: ✗ NO (expl=2.92e-01)            iters=1999  welfare=7.5073
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 101: ✗ NO (expl=6.57e-02)            iters=1999  welfare=6.1170
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 102: ✗ NO (expl=9.25e-02)            iters=1999  welfare=7.6314
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 103: ✗ NO (expl=2.64e-01)            iters=1999  welfare=7.7736
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 104: ✗ NO (expl=2.16e-01)            iters=1999  welfare=6.0525
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 105: ✗ NO (expl=2.40e-01)            iters=1999  welfare=7.0543
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 106: ✗ NO (expl=1.17e+00)            iters=1999  welfare=8.7727
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 107: ✗ NO (expl=2.63e-02)            iters=1999  welfare=8.2312
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 108: ✗ NO (expl=3.27e-01)            iters=1999  welfare=7.4684
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 109: ✗ NO (expl=1.38e-01)            iters=1999  welfare=5.3325
+
+  Summary for alpha=0.0030:
+    Success rate: 0/10 (0.0%)
+    Best exploitability achieved: 2.63e-02
+
+================================================================================
+Testing alpha = 0.0050
+================================================================================
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 100: ✗ NO (expl=1.46e-01)            iters=1999  welfare=6.9797
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 101: ✗ NO (expl=6.24e-03)            iters=1999  welfare=5.9880
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 102: ✗ NO (expl=3.56e-02)            iters=1999  welfare=7.4150
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 103: ✗ NO (expl=1.85e-01)            iters=1999  welfare=7.6896
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 104: ✗ NO (expl=1.27e-02)            iters=1999  welfare=5.6267
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 105: ✗ NO (expl=1.41e-01)            iters=1999  welfare=7.0876
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 106: ✗ NO (expl=1.97e-01)            iters=1999  welfare=6.5399
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 107: ✗ NO (expl=8.36e-03)            iters=1999  welfare=8.2129
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 108: ✗ NO (expl=1.08e-01)            iters=1999  welfare=7.1681
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 109: ✗ NO (expl=1.17e-02)            iters=1999  welfare=4.9795
+
+  Summary for alpha=0.0050:
+    Success rate: 0/10 (0.0%)
+    Best exploitability achieved: 6.24e-03
+
+================================================================================
+Testing alpha = 0.0070
+================================================================================
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 100: ✗ NO (expl=4.46e-02)            iters=1999  welfare=6.7184
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 101: ✓ CONVERGED                     iters=1870  welfare=5.9821
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 102: ✗ NO (expl=1.29e-02)            iters=1999  welfare=7.2706
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 103: ✗ NO (expl=8.75e-02)            iters=1999  welfare=7.5349
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 104: ✓ CONVERGED                     iters=1900  welfare=5.6237
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 105: ✗ NO (expl=4.24e-02)            iters=1999  welfare=7.1808
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 106: ✗ NO (expl=2.26e-02)            iters=1999  welfare=6.0565
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 107: ✗ NO (expl=4.05e-03)            iters=1999  welfare=8.1947
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 108: ✗ NO (expl=2.32e-02)            iters=1999  welfare=7.1390
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 109: ✗ NO (expl=1.02e-03)            iters=1999  welfare=4.9586
+
+  Summary for alpha=0.0070:
+    Success rate: 2/10 (20.0%)
+    Avg iterations (converged): 1885.0
+    Avg welfare (converged): 5.8029
+    Avg exploitability (converged): 9.85e-04
+
+================================================================================
+Testing alpha = 0.0100
+================================================================================
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 100: ✗ NO (expl=5.20e-03)            iters=1999  welfare=6.6800
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 101: ✓ CONVERGED                     iters=1310  welfare=5.9821
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 102: ✗ NO (expl=2.49e-03)            iters=1999  welfare=7.1511
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 103: ✗ NO (expl=1.90e-02)            iters=1999  welfare=7.3008
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 104: ✓ CONVERGED                     iters=1330  welfare=5.6237
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 105: ✗ NO (expl=5.01e-03)            iters=1999  welfare=7.2367
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 106: ✓ CONVERGED                     iters=1990  welfare=5.9543
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 107: ✗ NO (expl=2.15e-03)            iters=1999  welfare=8.1658
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 108: ✗ NO (expl=2.46e-03)            iters=1999  welfare=7.1720
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 109: ✓ CONVERGED                     iters=1400  welfare=4.9586
+
+  Summary for alpha=0.0100:
+    Success rate: 4/10 (40.0%)
+    Avg iterations (converged): 1507.5
+    Avg welfare (converged): 5.6297
+    Avg exploitability (converged): 9.69e-04
+
+================================================================================
+Testing alpha = 0.0150
+================================================================================
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 100: ✓ CONVERGED                     iters=1620  welfare=6.6962
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 101: ✓ CONVERGED                     iters= 870  welfare=5.9821
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 102: ✓ CONVERGED                     iters=1540  welfare=7.1173
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 103: ✗ NO (expl=1.56e-03)            iters=1999  welfare=7.1815
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 104: ✓ CONVERGED                     iters= 890  welfare=5.6239
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 105: ✓ CONVERGED                     iters=1730  welfare=7.2463
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 106: ✓ CONVERGED                     iters=1330  welfare=5.9539
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 107: ✗ NO (expl=1.21e-03)            iters=1999  welfare=8.1230
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 108: ✓ CONVERGED                     iters=1500  welfare=7.1808
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 109: ✓ CONVERGED                     iters= 930  welfare=4.9586
+
+  Summary for alpha=0.0150:
+    Success rate: 8/10 (80.0%)
+    Avg iterations (converged): 1301.2
+    Avg welfare (converged): 6.3449
+    Avg exploitability (converged): 9.66e-04
+
+================================================================================
+Testing alpha = 0.0200
+================================================================================
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 100: ✓ CONVERGED                     iters=1220  welfare=6.6968
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 101: ✓ CONVERGED                     iters= 650  welfare=5.9821
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 102: ✓ CONVERGED                     iters=1150  welfare=7.1173
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 103: ✓ CONVERGED                     iters=1580  welfare=7.1760
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 104: ✓ CONVERGED                     iters= 660  welfare=5.6236
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 105: ✓ CONVERGED                     iters=1290  welfare=7.2462
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 106: ✓ CONVERGED                     iters= 990  welfare=5.9546
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 107: ✓ CONVERGED                     iters=1760  welfare=8.1044
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 108: ✓ CONVERGED                     iters=1130  welfare=7.1813
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 109: ✓ CONVERGED                     iters= 700  welfare=4.9587
+
+  Summary for alpha=0.0200:
+    Success rate: 10/10 (100.0%)
+    Avg iterations (converged): 1113.0
+    Avg welfare (converged): 6.6041
+    Avg exploitability (converged): 9.66e-04
+
+================================================================================
+Testing alpha = 0.0300
+================================================================================
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 100: ✓ CONVERGED                     iters= 810  welfare=6.6969
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 101: ✓ CONVERGED                     iters= 430  welfare=5.9821
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 102: ✓ CONVERGED                     iters= 760  welfare=7.1173
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 103: ✓ CONVERGED                     iters=1050  welfare=7.1755
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 104: ✓ CONVERGED                     iters= 440  welfare=5.6237
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 105: ✓ CONVERGED                     iters= 860  welfare=7.2464
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 106: ✓ CONVERGED                     iters= 660  welfare=5.9542
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 107: ✓ CONVERGED                     iters=1160  welfare=8.1048
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 108: ✓ CONVERGED                     iters= 750  welfare=7.1815
+Warning: canonicalized state may have different bond dimensions from specified
+  Seed 109: ✓ CONVERGED                     iters= 460  welfare=4.9586
+
+  Summary for alpha=0.0300:
+    Success rate: 10/10 (100.0%)
+    Avg iterations (converged): 738.0
+    Avg welfare (converged): 6.6041
+    Avg exploitability (converged): 9.48e-04
+
+================================================================================
+OVERALL SUMMARY
+================================================================================
+
+ alpha  success_rate  n_converged  n_total  avg_iters  avg_welfare  avg_expl
+ 0.001           0.0            0       10        NaN          NaN  0.125538
+ 0.003           0.0            0       10        NaN          NaN  0.026320
+ 0.005           0.0            0       10        NaN          NaN  0.006243
+ 0.007          20.0            2       10    1885.00     5.802912  0.000985
+ 0.010          40.0            4       10    1507.50     5.629705  0.000969
+ 0.015          80.0            8       10    1301.25     6.344887  0.000966
+ 0.020         100.0           10       10    1113.00     6.604094  0.000966
+ 0.030         100.0           10       10     738.00     6.604108  0.000948
+
+================================================================================
+BEST LEARNING RATE: alpha = 0.0200
+  Success rate: 100.0%
+  Avg iterations: 1113.0
+  Avg welfare: 6.6041
+================================================================================
+
+Results saved to lr_sweep_results_4qubit.csv and lr_sweep_summary_4qubit.csv

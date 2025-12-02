@@ -4,7 +4,9 @@
       "Bash(cat:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(python test_solver_4qubit.py:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

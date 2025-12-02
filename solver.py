@@ -771,7 +771,7 @@ def opt_fid_state(
                 Psi = kick_with_u(Psi)
                 baseline_result = find_nash_eq1(Psi, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
                 Psi = to_canonical_form(baseline_result['state_'], form='B')
-            continue
+                continue
 
         energy_diffs = np.array(energy_diffs)  # Shape: (num_successful,)
         valid_param_diffs = np.stack(valid_param_diffs)  # Shape: (num_successful, param_dim)

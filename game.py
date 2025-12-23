@@ -92,32 +92,38 @@ def get_default_2players(option: str = 'H', dtype: np.dtype = np.float32):
     else:
         raise ValueError("Invalid option")
 
-def get_default_4players(option: str = 'H', dtype: np.dtype = np.float32):
+def get_default_cyclic_players(L: int, option: str = 'H', dtype: np.dtype = np.float32):
     """
-    Returns the default Hamiltonian for the 4-player quantum game on a ring graph.
+    Returns the default Hamiltonian for L-player quantum game on a cyclic/ring graph.
 
     Args:
+        L: Number of players (must be >= 2)
         option: Return format - 'H' for list, 'H_all_in_one' for stacked tensor
         dtype: Data type for arrays (default: np.float32)
 
     Returns:
         List[ndarray] or ndarray: Hamiltonian(s) representing payoff matrices
-            - If 'H': List of 4 arrays, each shape (2,2,2,2,2,2,2,2)
-            - If 'H_all_in_one': Single stacked array, shape (4,2,2,2,2,2,2,2,2)
+            - If 'H': List of L arrays, each shape (2,)*2L
+            - If 'H_all_in_one': Single stacked array, shape (L, (2,)*2L)
 
     Implementation:
         Uses graph-based construction from more_players.ipynb. Players are arranged
-        on a ring (0-1-2-3-0), each interacting with 2 neighbors. Pairwise interactions
-        use the same payoff structure as 2-player Prisoner's Dilemma.
+        on a ring (0-1-2-...-L-1-0), each interacting with 2 neighbors. Pairwise
+        interactions use the same payoff structure as 2-player Prisoner's Dilemma.
+
+        For L=2, this reduces to the standard 2-player game.
+        For L>=3, each player has exactly 2 neighbors on the ring.
     """
+    if L < 2:
+        raise ValueError(f"Number of players must be >= 2, got {L}")
+
     # Pairwise payoff from more_players.ipynb (same as 2-player game)
     H_pairwise = np.stack([
         np.diag(np.array([3., 0., 5., 1.], dtype=dtype)),   # Player 1's payoff in 2-player interaction
         np.diag(np.array([3., 5., 0., 1.], dtype=dtype))    # Player 2's payoff in 2-player interaction
     ])
 
-    # Ring graph topology: 0-1-2-3-0
-    L = 4
+    # Ring graph topology: 0-1-2-...-L-1-0
     H = []
 
     for site in range(L):
@@ -157,12 +163,47 @@ def get_default_4players(option: str = 'H', dtype: np.dtype = np.float32):
     else:
         raise ValueError(f"Invalid option: {option}")
 
+
+def get_default_4players(option: str = 'H', dtype: np.dtype = np.float32):
+    """
+    Backward compatibility wrapper for 4-player cyclic game.
+
+    Returns the default Hamiltonian for the 4-player quantum game on a ring graph.
+    This is equivalent to get_default_cyclic_players(L=4, ...).
+
+    Args:
+        option: Return format - 'H' for list, 'H_all_in_one' for stacked tensor
+        dtype: Data type for arrays (default: np.float32)
+
+    Returns:
+        List[ndarray] or ndarray: Hamiltonian(s) representing payoff matrices
+            - If 'H': List of 4 arrays, each shape (2,2,2,2,2,2,2,2)
+            - If 'H_all_in_one': Single stacked array, shape (4,2,2,2,2,2,2,2,2)
+    """
+    return get_default_cyclic_players(L=4, option=option, dtype=dtype)
+
 def get_default_H(num_players: int = 3, option: str = 'H', dtype: np.dtype = np.float32):
-    if num_players == 3:
-        return get_default_3players(option=option, dtype=dtype)
-    elif num_players == 2:
+    """
+    Returns the default Hamiltonian for num_players quantum game.
+
+    Args:
+        num_players: Number of players (must be >= 2)
+        option: Return format - 'H' for list, 'H_all_in_one' for stacked tensor
+        dtype: Data type for arrays (default: np.float32)
+
+    Returns:
+        List[ndarray] or ndarray: Hamiltonian(s) for the game
+
+    Implementation:
+        - For 2 players: Uses standard 2-player Prisoner's Dilemma payoffs
+        - For 3 players: Uses special 3-player symmetric payoffs
+        - For 4+ players: Uses cyclic/ring graph topology with pairwise interactions
+    """
+    if num_players == 2:
         return get_default_2players(option=option, dtype=dtype)
-    elif num_players == 4:
-        return get_default_4players(option=option, dtype=dtype)
+    elif num_players == 3:
+        return get_default_3players(option=option, dtype=dtype)
+    elif num_players >= 4:
+        return get_default_cyclic_players(L=num_players, option=option, dtype=dtype)
     else:
-        raise ValueError(f"Invalid number of players: {num_players}. Supported: 2, 3, 4")
+        raise ValueError(f"Invalid number of players: {num_players}. Must be >= 2")

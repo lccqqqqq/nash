@@ -1,6 +1,6 @@
 #!/bin/bash -l
 echo =========================================================   
-echo Job submitted  date = Tue  2 Dec 11:52:54 GMT 2025      
+echo Job submitted  date = Wed 10 Dec 22:52:25 GMT 2025      
 date_start=`date +%s`
 echo $SLURM_JOB_NUM_NODES nodes \( $SLURM_CPUS_ON_NODE processes per node \)        
 echo $SLURM_JOB_NUM_NODES hosts used: $SLURM_JOB_NODELIST      
@@ -15,7 +15,7 @@ echo
 ulimit -l unlimited
 
 export OMP_NUM_THEADS=1
- /usr/local/shared/slurm/bin/srun -u -n 200 --mpi=pmix --mem-per-cpu=1024 nice -n 10 /usr/bin/python3 qpd4.py
+ /usr/local/shared/slurm/bin/srun -u -n 1 --mpi=pmix --mem-per-cpu=10240 nice -n 10 /usr/bin/python3 solver.py --chi 8 --subroutine-lr 0.06 --num-players 3
   echo ---------------                                           
   echo Job output ends                                           
 

@@ -6,7 +6,11 @@
       "Bash(git commit:*)",
       "Bash(python3:*)",
       "Bash(python test_solver_4qubit.py:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(xargs -I {} bash -c 'echo \"\"\"\"=== {} ===\"\"\"\" && grep \"\"\"\"^def \"\"\"\" {}')"
     ],
     "deny": [],
     "ask": []

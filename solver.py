@@ -16,6 +16,7 @@ import pandas as pd
 import wandb
 import argparse
 import pickle
+import uuid
 
 from opt_mps_fiducial_state import apply_unitary
 from mps_utils import to_canonical_form, to_comp_basis, get_rand_mps, get_product_state, get_ghz_state, apply_random_unitaries, test_canonical_form
@@ -25,6 +26,7 @@ import sys
 
 
 # Pre-computed Pauli matrices and tensor products for unitary perturbations
+# Complex generators (for backward compatibility with complex Hamiltonians)
 PAULIS = [
     np.array([[0, 1], [1, 0]], dtype=np.complex128),      # σ_x
     np.array([[0, -1j], [1j, 0]], dtype=np.complex128),   # σ_y
@@ -35,6 +37,21 @@ PAULI_TENSORS_2Q = np.array([
     np.kron(PAULIS[i], PAULIS[j])
     for i in range(3) for j in range(3)
 ])  # Shape: (9, 4, 4)
+
+# Real generators for real Hamiltonians - use only those where exp(iH) is real
+# These are combinations involving Y: X⊗Y, Y⊗X, Y⊗Z, Z⊗Y
+# We work with iH directly (which is real and antisymmetric)
+# Key insight: iσ_y = [[0, 1], [-1, 0]] is real!
+iY = np.array([[0, 1], [-1, 0]], dtype=np.float64)  # iσ_y is real!
+sigma_x = np.array([[0, 1], [1, 0]], dtype=np.float64)
+sigma_z = np.array([[1, 0], [0, -1]], dtype=np.float64)
+
+REAL_PAULI_GENERATORS = np.array([
+    np.kron(sigma_x, iY),   # i(X⊗Y)
+    np.kron(iY, sigma_x),   # i(Y⊗X)
+    np.kron(iY, sigma_z),   # i(Y⊗Z)
+    np.kron(sigma_z, iY),   # i(Z⊗Y)
+], dtype=np.float64)  # Shape: (4, 4, 4)
 
 
 # Functions that compute the Nash equilibrium (using a local algorithm) and verify by computing the exploitability with differential evolution. This is doable because we are dealing with a small parameter space, and considering deviation only in the exp(iY) direction.
@@ -78,10 +95,10 @@ def find_nash_eq1(
     H: list[np.ndarray],
     max_iter: int = 10000,
     alpha: float = 0.01,
-    convergence_threshold: float = 1e-6,
-    expl_threshold: float = 1e-3,
+    convergence_threshold: float = 1e-7,
+    expl_threshold: float = 5e-4,
     use_tqdm: bool = False,
-    expl_check_interval: int = 3,
+    expl_check_interval: int = 10,
     return_history: bool = False,
 ):
     # Convert types to ndarray
@@ -112,10 +129,10 @@ def find_nash_eq1(
             dE = np.tensordot(psi.conj(), dE, axes=([j for j in range(L) if j != i], [j for j in range(L) if j != i]))
 
             E.append(np.trace(dE).real)
-            dE = np.eye(2) - alpha * dE
+            dE = np.eye(2, dtype=dE.dtype) - alpha * dE
 
             Y, _, Z = np.linalg.svd(dE)
-            unitaries.append((Y @ Z).T.conj())
+            unitaries.append((Y @ Z).T if np.isrealobj(dE) else (Y @ Z).T.conj())
 
         Es.append(np.array(E))
         if return_history:
@@ -181,6 +198,8 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
 
     - 'schmidt': Left-canonicalize and perturb singular values at specified bond (original method)
     - 'unitary': Apply random two-site unitary via Cayley transform with Pauli coefficients
+                 For real inputs: uses 4 generators (X⊗Y, Y⊗X, Y⊗Z, Z⊗Y) that preserve real dtype
+                 For complex inputs: uses all 9 two-qubit Pauli generators
 
     Args:
         Psi: MPS state (list of tensors)
@@ -192,6 +211,8 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
     Returns:
         For 'schmidt': (Psi_batch, original_S, batch_perturbed_S)
         For 'unitary': (Psi_batch, original_coefs, batch_coefs)
+            - For real inputs: coefs are shape (batch_size, 4)
+            - For complex inputs: coefs are shape (batch_size, 9)
     """
     # Convert to numpy if needed
     if isinstance(Psi[0], t.Tensor):
@@ -243,6 +264,16 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
         site_next = site + 1 # Open boundary conditions
         assert site_next < L, "Site next is out of bounds"
 
+        # Auto-detect whether to use real or complex generators
+        use_real_generators = np.isrealobj(Psi_np[0]) and all(np.isrealobj(Psi_np[i]) for i in range(len(Psi_np)))
+
+        if use_real_generators:
+            num_generators = 4
+            generators = REAL_PAULI_GENERATORS.astype(Psi_np[0].dtype)  # Match input dtype
+        else:
+            num_generators = 9
+            generators = PAULI_TENSORS_2Q
+
         # Make a copy for the batch
         Psi_batch = [einops.repeat(psi, '... -> batch ...', batch=batch_size) for psi in Psi_np]
 
@@ -253,19 +284,32 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
         )
         psi_grouped = einops.rearrange(psi_grouped, 'batch d1 d2 chi_l chi_r -> batch (d1 d2) chi_l chi_r')
 
-        # Generate random Pauli coefficients (batch_size, 9)
-        coefs_batch = np.random.randn(batch_size, 9)
+        # Generate random coefficients
+        coefs_batch = np.random.randn(batch_size, num_generators)
         coefs_batch = coefs_batch / np.linalg.norm(coefs_batch, axis=1, keepdims=True)
-        original_coefs = np.zeros((batch_size, 9))  # For consistency with return signature # okay...
+        original_coefs = np.zeros((batch_size, num_generators))
 
-        # Construct the anti-Hermitian generator: H_batch[b] = sum_k coefs[b,k] * PAULI_TENSORS_2Q[k]
-        H_batch = np.einsum('bk,kij->bij', coefs_batch, PAULI_TENSORS_2Q)
+        if use_real_generators:
+            # Real case: generators are already iH (real, antisymmetric)
+            # Construct batch of generators
+            iH_batch = np.einsum('bk,kij->bij', coefs_batch, generators)
 
-        # Apply Cayley transform: U = (I + iλH/2) @ inv(I - iλH/2)
-        I4 = np.eye(4, dtype=np.complex128)
-        numerator = I4[None, :, :] + 1j * lr * H_batch / 2
-        denominator = I4[None, :, :] - 1j * lr * H_batch / 2
-        U_batch = numerator @ np.linalg.inv(denominator)
+            # Cayley transform: U = (I + λiH/2) @ inv(I - λiH/2)
+            # Since iH is real, U is real
+            I4 = np.eye(4, dtype=Psi_np[0].dtype)
+            numerator = I4[None, :, :] + lr * iH_batch / 2
+            denominator = I4[None, :, :] - lr * iH_batch / 2
+            U_batch = numerator @ np.linalg.inv(denominator)
+        else:
+            # Complex case: generators are Pauli matrices (Hermitian)
+            # Construct anti-Hermitian generator iH
+            H_batch = np.einsum('bk,kij->bij', coefs_batch, generators)
+
+            # Cayley transform: U = (I + iλH/2) @ inv(I - iλH/2)
+            I4 = np.eye(4, dtype=np.complex128)
+            numerator = I4[None, :, :] + 1j * lr * H_batch / 2
+            denominator = I4[None, :, :] - 1j * lr * H_batch / 2
+            U_batch = numerator @ np.linalg.inv(denominator)
 
         # Apply the unitary
         psi_new_grouped = einops.einsum(
@@ -385,9 +429,14 @@ def update_state_unitary(Psi, coef_grad_est, lr, site):
     """
     Apply targeted unitary update to the state using Pauli coefficient gradients.
 
+    Auto-detects whether state is real or complex:
+    - Real state: Uses 4 generators (X⊗Y, Y⊗X, Y⊗Z, Z⊗Y), preserves real dtype
+    - Complex state: Uses all 9 two-qubit Pauli generators
+
     Args:
         Psi: MPS state (list of tensors)
-        coef_grad_est: Gradient estimate in Pauli coefficient space, shape (9,)
+        coef_grad_est: Gradient estimate in Pauli coefficient space
+                       Shape (4,) for real states, (9,) for complex states
         lr: Learning rate
         site: Site index where update is applied
 
@@ -401,17 +450,41 @@ def update_state_unitary(Psi, coef_grad_est, lr, site):
     L = len(Psi)
     site_next = (site + 1) % L  # Periodic boundary conditions
 
+    # Auto-detect whether to use real or complex generators
+    use_real_generators = np.isrealobj(Psi[0]) and all(np.isrealobj(Psi[i]) for i in range(len(Psi)))
+
+    if use_real_generators:
+        num_generators = 4
+        generators = REAL_PAULI_GENERATORS.astype(Psi[0].dtype)
+    else:
+        num_generators = 9
+        generators = PAULI_TENSORS_2Q
+
+    # Validate gradient dimension
+    assert coef_grad_est.shape[0] == num_generators, \
+        f"Gradient shape {coef_grad_est.shape} doesn't match expected num_generators={num_generators}"
+
     # Normalize the gradient to get update direction
     coef_update = coef_grad_est / (np.linalg.norm(coef_grad_est) + 1e-10)
 
-    # Construct Hamiltonian from gradient direction
-    H = np.einsum('k,kij->ij', coef_update, PAULI_TENSORS_2Q)
+    if use_real_generators:
+        # Real case: generators are already iH
+        iH = np.einsum('k,kij->ij', coef_update, generators)
 
-    # Apply Cayley transform with learning rate: U = (I + iλH/2) @ inv(I - iλH/2)
-    I4 = np.eye(4, dtype=np.complex128)
-    numerator = I4 + 1j * lr * H / 2
-    denominator = I4 - 1j * lr * H / 2
-    U = numerator @ np.linalg.inv(denominator)
+        # Cayley transform with real arithmetic
+        I4 = np.eye(4, dtype=Psi[0].dtype)
+        numerator = I4 + lr * iH / 2
+        denominator = I4 - lr * iH / 2
+        U = numerator @ np.linalg.inv(denominator)
+    else:
+        # Complex case: generators are Pauli matrices
+        H = np.einsum('k,kij->ij', coef_update, generators)
+
+        # Cayley transform with complex arithmetic
+        I4 = np.eye(4, dtype=np.complex128)
+        numerator = I4 + 1j * lr * H / 2
+        denominator = I4 - 1j * lr * H / 2
+        U = numerator @ np.linalg.inv(denominator)
 
     # Group the two adjacent sites
     psi_grouped = einops.einsum(
@@ -672,7 +745,7 @@ def metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=Tr
         data[f'energy_player_{i}'] = [log['energy'][i] for log in metric_logs]
 
     # Add entanglement parameters if available and requested
-    if include_ent_params and 'ent_params' in metric_logs[0]:
+    if include_ent_params and 'ent_params' in metric_logs[0] and metric_logs[0]['ent_params'] is not None:
         num_ent_params = len(metric_logs[0]['ent_params'])
 
         if num_ent_params == 5:
@@ -698,6 +771,63 @@ def metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=Tr
     return df
 
 
+def save_results(save_dir, Psi, metric_logs, **params):
+    """Save optimization results with UUID and metadata.
+
+    Args:
+        save_dir: Directory to save results
+        Psi: Final MPS state
+        metric_logs: List of metric dicts from optimization
+        **params: All optimization parameters (chi, eps, max_num_steps, etc.)
+
+    Returns:
+        filepath: Path to saved file
+        run_uuid: UUID string
+    """
+    from datetime import datetime
+
+    run_uuid = str(uuid.uuid4())
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Build pre-computed DataFrame
+    df = metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=True)
+
+    # Build flat metadata dict (all params + results summary)
+    num_players = len(Psi)
+    metadata = {
+        # Identifiers
+        'uuid': run_uuid,
+        'timestamp': timestamp,
+
+        # All optimization parameters (flatten **params)
+        **params,
+
+        # Results summary
+        'final_welfare': float(df['welfare'].iloc[-1]) if len(df) > 0 else None,
+        'best_welfare': float(df['welfare'].max()) if len(df) > 0 else None,
+        'num_iterations': len(metric_logs),
+    }
+
+    # Package everything
+    results = {
+        'metadata': metadata,
+        'metric_logs': metric_logs,
+        'dataframe': df,
+    }
+
+    # Save single file with descriptive prefix
+    os.makedirs(save_dir, exist_ok=True)
+    filename = f"qpd{num_players}_{run_uuid}.pkl"
+    filepath = os.path.join(save_dir, filename)
+
+    with open(filepath, 'wb') as f:
+        pickle.dump(results, f)
+
+    print(f"Results saved to: {filepath}")
+    print(f"UUID: {run_uuid}")
+
+    return filepath, run_uuid
+
 
 def opt_fid_state(
     Psi: list[np.ndarray], # Initial fiducial state
@@ -711,8 +841,10 @@ def opt_fid_state(
     use_wandb: bool = False, # Whether to use wandb logging
     wandb_project: str = "nash-equilibrium", # W&B project name
     wandb_config: dict = None, # Additional wandb config
+    wandb_log_interval: int = 1, # Log to wandb every N steps (1 = every step, 20 = every 20 steps)
     save_results: bool = True, # Whether to save results to file
     save_dir: str = "data", # Directory to save results
+    seed: int = None, # Random seed used for initialization (for tracking/reproducibility)
 ):
     assert all(isinstance(Psi[i], np.ndarray) for i in range(len(Psi))), "Psi must be a list of numpy arrays"
     assert all(isinstance(H[i], np.ndarray) for i in range(len(H))), "H must be a list of numpy arrays"
@@ -780,7 +912,7 @@ def opt_fid_state(
                 Psi = kick_with_u(Psi)
                 baseline_result = find_nash_eq1(Psi, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
                 Psi = to_canonical_form(baseline_result['state_'], form='B')
-                continue
+            continue
 
         energy_diffs = np.array(energy_diffs)  # Shape: (num_successful,)
         valid_param_diffs = np.stack(valid_param_diffs)  # Shape: (num_successful, param_dim)
@@ -802,9 +934,13 @@ def opt_fid_state(
         Psi = to_canonical_form(baseline_result['state_'], form='B')
 
         # metric logs
-        # Compute entanglement parameters
-        psi_comp = to_comp_basis(Psi).reshape([2] * len(Psi))
-        ent_params = compute_ent_params_from_state(psi_comp, option='I')
+        # Compute entanglement parameters (only for 3 or 4 qubits)
+        num_players = len(Psi)
+        if num_players <= 4:
+            psi_comp = to_comp_basis(Psi).reshape([2] * num_players)
+            ent_params = compute_ent_params_from_state(psi_comp, option='I')
+        else:
+            ent_params = None
 
         metrics = {
             'energy': baseline_result['energy'],
@@ -814,26 +950,28 @@ def opt_fid_state(
         }
         metric_logs.append(metrics)
 
-        # Log to wandb
-        if use_wandb:
+        # Log to wandb (at specified interval or on last step)
+        should_log = (i % wandb_log_interval == 0) or (i == max_num_steps - 1)
+        if use_wandb and should_log:
             wandb_metrics = {
                 'welfare': np.real(metrics['welfare']),
             }
 
-            # Add entanglement parameters with appropriate labels
-            if len(ent_params) == 5:
-                # 3-qubit case: I1, I2, I3, I4, I5
-                param_names = ['I1', 'I2', 'I3', 'I4', 'I5']
-            elif len(ent_params) == 4:
-                # 4-qubit case: H, L, M, Dxt
-                param_names = ['H', 'L', 'M', 'Dxt']
-            else:
-                # Generic fallback
-                param_names = [f'param_{i}' for i in range(len(ent_params))]
+            # Add entanglement parameters with appropriate labels (only for 3 or 4 qubits)
+            if ent_params is not None:
+                if len(ent_params) == 5:
+                    # 3-qubit case: I1, I2, I3, I4, I5
+                    param_names = ['I1', 'I2', 'I3', 'I4', 'I5']
+                elif len(ent_params) == 4:
+                    # 4-qubit case: H, L, M, Dxt
+                    param_names = ['H', 'L', 'M', 'Dxt']
+                else:
+                    # Generic fallback
+                    param_names = [f'param_{i}' for i in range(len(ent_params))]
 
-            for i_param, name in enumerate(param_names):
-                value = ent_params[i_param]
-                wandb_metrics[f'ent_params/{name}'] = np.real(value.item() if hasattr(value, 'item') else float(value))
+                for i_param, name in enumerate(param_names):
+                    value = ent_params[i_param]
+                    wandb_metrics[f'ent_params/{name}'] = np.real(value.item() if hasattr(value, 'item') else float(value))
 
             # Log individual player energies
             for player_idx, energy in enumerate(metrics['energy']):
@@ -847,33 +985,20 @@ def opt_fid_state(
 
     # Save results to file
     if save_results:
-        os.makedirs(save_dir, exist_ok=True)
-
-        # Generate base filename with timestamp and parameters
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        chi = Psi[0].shape[1]
-        base_filename = (
-            f"opt_fid_state_"
-            f"chi{chi}_"
-            f"lr{eps:.0e}_"
-            f"steps{max_num_steps}_"
-            f"alpha{subroutine_lr:.0e}_"
-            f"method{perturbation_method}_"
-            f"{timestamp}"
+        filepath, run_uuid = save_results(
+            save_dir=save_dir,
+            Psi=Psi,
+            metric_logs=metric_logs,
+            chi=Psi[0].shape[1],
+            num_players=len(Psi),
+            max_num_steps=max_num_steps,
+            eps=eps,
+            num_perturbations=num_perturbations,
+            subroutine_max_iter=subroutine_max_iter,
+            subroutine_lr=subroutine_lr,
+            perturbation_method=perturbation_method,
+            seed=seed,
         )
-
-        # Save metrics as CSV (without states, for easy analysis)
-        df = metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=True)
-        csv_filepath = os.path.join(save_dir, base_filename + ".csv")
-        df.to_csv(csv_filepath)
-        print(f"Metrics saved to: {csv_filepath}")
-
-        # Save full data including states as pickle (for complete recovery)
-        pickle_filepath = os.path.join(save_dir, base_filename + ".pkl")
-        with open(pickle_filepath, 'wb') as f:
-            pickle.dump(metric_logs, f)
-        print(f"Full data (with states) saved to: {pickle_filepath}")
 
     return Psi, metric_logs
 
@@ -886,6 +1011,7 @@ def parse_args():
         'chi': 4,
         'num_players': 3,
         'seed': None,
+        'dtype': 'real',
 
         # Optimization parameters
         'max_num_steps': 1000,
@@ -903,6 +1029,7 @@ def parse_args():
         'wandb_experiment': 'default',
         'save_results': True,
         'save_dir': 'data',
+        'include_state': False,
     }
     # ===========================================
 
@@ -949,7 +1076,10 @@ def parse_args():
                         help='Disable saving results')
     parser.add_argument('--save-dir', type=str, default=DEFAULTS['save_dir'],
                         help='Directory to save results')
-
+    parser.add_argument('--include-state', action='store_true', default=DEFAULTS['include_state'],
+                        help='Include state in the results')
+    parser.add_argument('--dtype', type=str, default=DEFAULTS['dtype'],
+                        help='Data type for the state and Hamiltonian')
     return parser.parse_args()
 
 
@@ -959,17 +1089,25 @@ if __name__ == "__main__":
     # Set random seed if provided
     if args.seed is not None:
         np.random.seed(args.seed)
+    
+    if args.dtype == 'real':
+        dtype = np.float32
+    elif args.dtype == 'complex':
+        dtype = np.complex64
+    else:
+        raise ValueError(f"Unknown dtype: {args.dtype}")
 
     # Initialize state and Hamiltonian
     print(f"Initializing random MPS with L={args.num_players}, chi={args.chi}")
-    Psi = get_rand_mps(L=args.num_players, chi=args.chi, d_phys=2, seed=args.seed)
-    H = get_default_H(num_players=args.num_players)
+    Psi = get_rand_mps(L=args.num_players, chi=args.chi, d_phys=2, seed=args.seed, dtype=dtype)
+    H = get_default_H(num_players=args.num_players, dtype=dtype)
 
     # Prepare wandb config
     wandb_config = {
         'experiment': args.wandb_experiment,
         'chi': args.chi,
         'seed': args.seed,
+        'dtype': dtype,
     }
 
     print(f"Starting optimization:")
@@ -999,7 +1137,7 @@ if __name__ == "__main__":
     )
 
     # Display summary
-    df = metrics_to_dataframe(metric_logs, include_state=False)
+    df = metrics_to_dataframe(metric_logs, include_state=args.include_state)
     print("\n" + "="*50)
     print("Optimization Summary")
     print("="*50)

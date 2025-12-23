@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 import wandb
 from datetime import datetime
+from mps_utils import to_comp_basis
 
 from typing import List, Tuple, Dict, Any
 
@@ -311,35 +312,40 @@ def find_nash_eq(Psi, H, max_iter=10000, alpha=10, convergence_threshold=1e-6, s
 
     return result
 
-def compute_energy(Psi: list[t.Tensor], H: t.Tensor):
+def compute_energies(Psi: list[np.ndarray] | np.ndarray, H: list[np.ndarray] | np.ndarray):
     """
     Computes expected payoff (energy) for all players given current state.
 
     Args:
-        Psi: List of MPS tensors
+        Psi: List of MPS tensors or computational basis state
         H: Stacked Hamiltonian of shape (n_players, 2, 2, 2, 2, 2, 2)
 
     Returns:
-        Tensor: Energy for each player, shape (n_players,)
+        List[float]: Energies for each player
 
     Implementation:
         - Converts MPS to full state ψ
         - Computes ⟨ψ|H_i|ψ⟩ for each player i
         - Uses Einstein summation for efficient tensor contraction
-        - Returns real part (energies are real by construction)
 
-    Note: Works for 3-site systems (not thermodynamic limit).
+    Note: Works for generic number of players.
     """
     if isinstance(H, list):
-        H = t.stack(H)
-        
-    psi = get_state_from_tensors(Psi)
-    coord_str = 'a1 a2 a3'
-    coord_str_conj = 'b1 b2 b3'
+        H = np.stack(H)
+    
+    if isinstance(Psi, list):
+        psi = to_comp_basis(Psi).reshape([2] * len(Psi))
+    else:
+        if Psi.ndim == 1:
+            psi = Psi.reshape([2] * int(np.log2(Psi.shape[0])))
+        else:
+            psi = Psi
+    coord_str = "".join([f"a{i} " for i in range(psi.ndim)])
+    coord_str_conj = "".join([f"b{i} " for i in range(psi.ndim)])
     contraction_specification = "".join([coord_str, ', batch ', coord_str, ' ', coord_str_conj, ', ', coord_str_conj, ' -> batch'])
     # print(f"Contraction specification: {contraction_specification}")
     E = einops.einsum(psi, H, psi.conj(), contraction_specification)
-    return t.real(E)
+    return np.real(E)
 
 def batch_compute_energy(Psi: list[t.Tensor], H: t.Tensor, Psi_batch: Float[t.Tensor, "batch phys chi_l chi_r"], active_site: int):
     """

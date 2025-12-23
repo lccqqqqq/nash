@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 def gather_equilibrium_statistics(
     H: list[np.ndarray],
+    L: int,
     num_samples: int = 50,
     max_iter: int = 1000,
     alpha: float = 0.06,
@@ -23,7 +24,7 @@ def gather_equilibrium_statistics(
 ):
     results = []
     for i in tqdm(range(num_samples)):
-        Psi = get_rand_mps(L=4, chi=8, dtype=np.float32)
+        Psi = get_rand_mps(L=L, chi=32, dtype=np.float32)
         result = find_nash_eq1(Psi=Psi, H=H, max_iter=max_iter, alpha=alpha, convergence_threshold=convergence_threshold, expl_threshold=expl_threshold, use_tqdm=use_tqdm, expl_check_interval=expl_check_interval, return_history=return_history)
         results.append(result)
     
@@ -35,5 +36,5 @@ def gather_equilibrium_statistics(
 
 
 if __name__ == "__main__":
-    H = get_default_H(num_players=4, option='H', dtype=np.float32)
-    results = gather_equilibrium_statistics(H=H)
+    H = get_default_H(num_players=6, option='H', dtype=np.float32)
+    results = gather_equilibrium_statistics(H=H, L=6, save_dir="data/qpd6_results")

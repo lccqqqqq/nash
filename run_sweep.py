@@ -19,6 +19,7 @@ from solver import opt_fid_state
 
 
 # Python-based sweep configuration (alternative to YAML)
+# Bayesian optimization config - uses continuous distributions
 SWEEP_CONFIG = {
     'method': 'bayes',  # 'grid', 'random', or 'bayes'
     'metric': {
@@ -27,8 +28,9 @@ SWEEP_CONFIG = {
     },
     'parameters': {
         # State initialization
-        'chi': {'values': [2, 4, 6]},
-        'num_players': {'values': [3, 4]},  # Support both 3 and 4 player games
+        'chi': {'value': 8},
+        'num_players': {'value': 5},  # Support both 3 and 4 player games
+        'seed': {'values': [42, 123, 456, 789, 1337]},  # Different initializations
 
         # Optimization parameters
         'eps': {
@@ -36,7 +38,7 @@ SWEEP_CONFIG = {
             'min': 0.001,
             'max': 0.1
         },
-        'num_perturbations': {'values': [3, 5, 10]},
+        'num_perturbations': {'value': 20},
         'perturbation_method': {'value': 'unitary'},
 
         # Nash equilibrium subroutine
@@ -48,13 +50,44 @@ SWEEP_CONFIG = {
         'subroutine_max_iter': {'value': 1000},
 
         # Fixed parameters
-        'max_num_steps': {'value': 100},
+        'max_num_steps': {'value': 1000},
+        'wandb_log_interval': {'value': 20},  # Log every 20 steps for efficiency
     },
     'early_terminate': {
         'type': 'hyperband',
         'min_iter': 10,
         'eta': 2
     }
+}
+
+# Grid search config - uses discrete values only
+# To use this, change the main() function to use SWEEP_CONFIG_GRID instead
+SWEEP_CONFIG_GRID = {
+    'method': 'grid',
+    'metric': {
+        'name': 'welfare',
+        'goal': 'maximize'
+    },
+    'parameters': {
+        # State initialization
+        'chi': {'value': 32},
+        'num_players': {'value': 3},
+        'seed': {'values': [42, 123, 456]},  # 3 seeds for grid
+
+        # Optimization parameters - manually discretized
+        'eps': {'values': [0.001, 0.003, 0.007, 0.01, 0.03, 0.07, 0.1]},  # 5 values (log-spaced)
+        'num_perturbations': {'value': 20},
+        'perturbation_method': {'value': 'unitary'},
+
+        # Nash equilibrium subroutine - manually discretized
+        'subroutine_lr': {'values': [0.01, 0.03, 0.06, 0.1, 0.3]},  # 5 values (log-spaced)
+        'subroutine_max_iter': {'value': 1000},
+
+        # Fixed parameters
+        'max_num_steps': {'value': 1000},
+        'wandb_log_interval': {'value': 20},  # Log every 20 steps for efficiency
+    },
+    # Note: Grid search doesn't use early termination
 }
 
 
@@ -98,9 +131,11 @@ def train_sweep():
             subroutine_lr=config.get('subroutine_lr', 0.03),
             use_wandb=True,  # Always true for sweeps
             wandb_project=config.get('wandb_project', 'nash-equilibrium'),
-            wandb_config={'sweep_run': True},
+            wandb_config={'sweep_run': True, 'seed': seed},
+            wandb_log_interval=config.get('wandb_log_interval', 20),  # Log every 20 steps by default for sweeps
             save_results=config.get('save_results', True),
-            save_dir=config.get('save_dir', 'data')
+            save_dir=config.get('save_dir', 'data'),
+            seed=seed,  # Pass seed for metadata tracking
         )
 
         print(f"\nCompleted sweep run: {run.name}\n")
@@ -114,6 +149,8 @@ def main():
                         help='Path to YAML sweep configuration file')
     parser.add_argument('--create-sweep', action='store_true',
                         help='Create sweep using Python config instead of YAML')
+    parser.add_argument('--method', type=str, choices=['bayes', 'grid'], default='bayes',
+                        help='Sweep method: bayes (default) or grid')
     parser.add_argument('--sweep-id', type=str, default=None,
                         help='Existing sweep ID to join (if not creating new)')
 
@@ -140,9 +177,14 @@ def main():
             with open(args.config, 'r') as f:
                 sweep_config = yaml.safe_load(f)
         elif args.create_sweep:
-            # Use Python config
-            print("Creating sweep from Python configuration")
-            sweep_config = SWEEP_CONFIG
+            # Use Python config - select based on method
+            if args.method == 'grid':
+                print("Creating GRID sweep from Python configuration")
+                print(f"  Total runs: {3 * 5 * 5} (3 seeds × 5 eps × 5 subroutine_lr)")
+                sweep_config = SWEEP_CONFIG_GRID
+            else:
+                print("Creating BAYES sweep from Python configuration")
+                sweep_config = SWEEP_CONFIG
         else:
             print("Error: Must specify either --config, --create-sweep, or --sweep-id")
             return

@@ -2,22 +2,31 @@
 Utility functions for loading and analyzing saved optimization results.
 
 Usage:
-    from load_results import load_pickle, load_csv, analyze_run
+    from load_results import load_result, get_metadata, get_dataframe, find_results
 
-    # Load full data with states
+    # Load UUID-based result file (new format)
+    results = load_result('data/qpd3_a1b2c3d4-e5f6-7890-1234-567890abcdef.pkl')
+    metadata = results['metadata']
+    df = results['dataframe']
+    final_state = results['metric_logs'][-1]['state']
+
+    # Quick metadata access
+    metadata = get_metadata('data/qpd3_a1b2c3d4-e5f6-7890-1234-567890abcdef.pkl')
+
+    # Search for runs
+    chi4_runs = find_results('data', chi=4, perturbation_method='unitary')
+
+    # Legacy format support
     metric_logs = load_pickle('data/opt_fid_state_chi4_lr1e-02_steps100_alpha3e-02_20250117_123456.pkl')
-
-    # Load just metrics
     df = load_csv('data/opt_fid_state_chi4_lr1e-02_steps100_alpha3e-02_20250117_123456.csv')
-
-    # Quick analysis
-    analyze_run('data/opt_fid_state_chi4_lr1e-02_steps100_alpha3e-02_20250117_123456.pkl')
 """
 
 import pickle
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+import glob
 from pathlib import Path
 
 
@@ -56,6 +65,121 @@ def load_csv(filepath):
     print(f"Loaded {len(df)} iterations from {filepath}")
     return df
 
+
+# ========== New UUID-based Format Functions ==========
+
+def load_result(filepath):
+    """
+    Load UUID-based result file (new format).
+
+    Args:
+        filepath: Path to .pkl file (e.g., 'data/qpd3_uuid.pkl')
+
+    Returns:
+        dict with keys:
+            - 'metadata': dict with all params and results summary
+            - 'metric_logs': list of dicts (energy, welfare, state, ent_params)
+            - 'dataframe': pre-computed pd.DataFrame
+    """
+    with open(filepath, 'rb') as f:
+        results = pickle.load(f)
+
+    # Validate format
+    if not isinstance(results, dict) or 'metadata' not in results:
+        raise ValueError(
+            f"File {filepath} is not in the new UUID format. "
+            "Use load_pickle() for legacy format."
+        )
+
+    print(f"Loaded result from {filepath}")
+    print(f"  UUID: {results['metadata'].get('uuid', 'N/A')}")
+    print(f"  Iterations: {results['metadata'].get('num_iterations', 'N/A')}")
+    print(f"  Final Welfare: {results['metadata'].get('final_welfare', 'N/A'):.4f}")
+
+    return results
+
+
+def get_metadata(filepath):
+    """
+    Quick access to metadata without loading full file.
+
+    Args:
+        filepath: Path to .pkl file
+
+    Returns:
+        dict: Metadata with all parameters and results summary
+    """
+    results = load_result(filepath)
+    return results['metadata']
+
+
+def get_dataframe(filepath):
+    """
+    Quick access to pre-computed DataFrame.
+
+    Args:
+        filepath: Path to .pkl file
+
+    Returns:
+        pd.DataFrame: Pre-computed metrics dataframe
+    """
+    results = load_result(filepath)
+    return results['dataframe']
+
+
+def get_final_state(filepath):
+    """
+    Extract final MPS state.
+
+    Args:
+        filepath: Path to .pkl file
+
+    Returns:
+        list[np.ndarray]: Final MPS tensors
+    """
+    results = load_result(filepath)
+    return results['metric_logs'][-1]['state']
+
+
+def find_results(save_dir='data', **filters):
+    """
+    Find result files matching metadata filters.
+
+    Args:
+        save_dir: Directory to search (default: 'data')
+        **filters: Metadata fields to filter on
+
+    Returns:
+        List of matching filepaths
+
+    Example:
+        find_results(chi=4, num_players=3, perturbation_method='unitary')
+    """
+    matches = []
+    pattern = os.path.join(save_dir, 'qpd*.pkl')
+
+    for filepath in glob.glob(pattern):
+        try:
+            # Load metadata only (without printing)
+            with open(filepath, 'rb') as f:
+                results = pickle.load(f)
+
+            if not isinstance(results, dict) or 'metadata' not in results:
+                continue  # Skip legacy format files
+
+            metadata = results['metadata']
+
+            # Check if all filters match
+            if all(metadata.get(k) == v for k, v in filters.items()):
+                matches.append(filepath)
+        except Exception:
+            continue  # Skip corrupted files
+
+    print(f"Found {len(matches)} matching result(s) in {save_dir}")
+    return matches
+
+
+# ========== Legacy Format Functions (unchanged) ==========
 
 def get_state_at_iteration(metric_logs, iteration):
     """

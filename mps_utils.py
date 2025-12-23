@@ -120,6 +120,96 @@ def to_comp_basis(Psi: List[np.ndarray]):
 
     return psi.squeeze().reshape(2**len(Psi))
 
+def from_comp_basis(state_vector, L=None, max_bond_dim=None, cutoff=1e-16):
+    """
+    Converts a dense quantum state vector into a Matrix Product State (MPS)
+    representation using Singular Value Decomposition (SVD).
+    
+    The resulting MPS is in left-canonical form (gamma-lambda form without the lambdas explicit).
+    
+    Args:
+        state_vector (np.ndarray): The quantum state vector of shape (2**L,).
+        L (int, optional): The number of qubits/sites. If None, inferred from vector length.
+        max_bond_dim (int, optional): The maximum bond dimension (chi) to keep. 
+                                      If None, no truncation is applied.
+        cutoff (float, optional): Singular value truncation threshold. 
+                                  Singular values smaller than this are discarded.
+
+    Returns:
+        list[np.ndarray]: A list of length L, where the i-th element is a tensor 
+                          representing the MPS tensor at site i.
+                          Shapes are usually (chi_left, physical_dim, chi_right).
+                          Physical dimension is assumed to be 2 (qubits).
+    """
+    
+    # 1. Validation and Setup
+    N = state_vector.size
+    if L is None:
+        L = int(np.log2(N))
+    
+    if 2**L != N:
+        raise ValueError(f"State vector size {N} is not a power of 2 (expected 2^{L}).")
+
+    # Reshape the vector into a 2D-like structure to start the SVD chain
+    # We treat the remaining part of the system as the 'columns'
+    psi = np.array(state_vector).reshape(1, -1)
+    
+    mps_tensors = []
+    
+    # Iterate through sites 0 to L-2
+    for i in range(L - 1):
+        # Current shape of psi is (r_{i-1}, 2 * 2^{L-1-i})
+        # We want to isolate the physical index of the current site 'i'
+        # Reshape to: (r_{i-1} * 2,  remaining_dim)
+        r_prev = psi.shape[0]
+        remaining_sites = L - 1 - i
+        dim_right = 2**remaining_sites
+        
+        # Reshape for SVD: Combine (alpha_{i-1}, sigma_i) into rows
+        psi_reshaped = psi.reshape(r_prev * 2, dim_right)
+        
+        # Perform SVD
+        # U: (rows, k), S: (k,), Vh: (k, cols)
+        U, S, Vh = np.linalg.svd(psi_reshaped, full_matrices=False)
+        
+        # --- Truncation Logic ---
+        # Determine number of singular values to keep
+        keep_indices = S > cutoff
+        if max_bond_dim is not None:
+            # Keep at most max_bond_dim, but also respect the cutoff
+            limit = min(max_bond_dim, len(S))
+            # We want the top 'limit' indices that also satisfy the cutoff
+            # Since S is sorted descending, we just slice.
+            keep_count = min(np.sum(keep_indices), limit)
+        else:
+            keep_count = np.sum(keep_indices)
+            
+        # Ensure we keep at least one singular value to avoid empty tensors
+        keep_count = max(keep_count, 1)
+        
+        # Slice matrices
+        U = U[:, :keep_count]
+        S = S[:keep_count]
+        Vh = Vh[:keep_count, :]
+        
+        # Reshape U back to a rank-3 MPS tensor: (r_{i-1}, physical=2, r_i)
+        # U was (r_{i-1} * 2, keep_count)
+        mps_tensor = U.reshape(r_prev, 2, keep_count)
+        mps_tensors.append(mps_tensor)
+        
+        # Prepare the remainder state for the next step
+        # Contract S and Vh to form the matrix for the next iteration
+        psi = np.diag(S) @ Vh
+        
+    # Handle the last site
+    # psi is now (r_{L-1}, 2). The last tensor is just this remaining matrix
+    # Reshaped to standard MPS form (r_{L-1}, 2, 1)
+    last_tensor = psi.reshape(psi.shape[0], 2, 1)
+    mps_tensors.append(last_tensor)
+    
+    mps_tensors = [einops.rearrange(tensor, "chi_l a0 chi_r -> a0 chi_l chi_r") for tensor in mps_tensors]
+    return mps_tensors
+
 
 def get_product_state(L: int = 3, state_per_site: List[int] | None = None,
                       dtype: np.dtype = np.float32):

@@ -3,25 +3,25 @@
 Create a W&B sweep and generate commands file for cluster multirun.
 
 This script:
-1. Creates a W&B sweep from a YAML config
+1. Creates a W&B sweep from a YAML config or Python config
 2. Saves the sweep ID to a file
 3. Generates a commands.txt file for your cluster's multirun system
 
 Usage:
-    # Basic usage
-    python setup_cluster_sweep.py --config sweep_config.yaml
+    # From YAML config
+    python setup_cluster_sweep.py --config sweep_config.yaml --num-workers 10
 
-    # With custom name and workers
-    python setup_cluster_sweep.py \
-        --config sweep_config.yaml \
-        --name "high-chi-experiment-v2" \
-        --num-workers 20 \
-        --count-per-worker 5
+    # From Python config (Bayesian optimization)
+    python setup_cluster_sweep.py --create-sweep --num-workers 20 --count-per-worker 5
 
-    # With entity (for team accounts)
+    # From Python config (Grid search - 75 runs total)
+    python setup_cluster_sweep.py --create-sweep --method grid --num-workers 25 --count-per-worker 3
+
+    # With custom name and entity (team accounts)
     python setup_cluster_sweep.py \
-        --config sweep_config.yaml \
-        --name "baseline-test" \
+        --create-sweep \
+        --method bayes \
+        --name "seed-sweep-v1" \
         --project nash-equilibrium \
         --entity my-team \
         --num-workers 10 \
@@ -42,8 +42,12 @@ def main():
     )
 
     # Sweep configuration
-    parser.add_argument('--config', required=True,
+    parser.add_argument('--config', default=None,
                         help='Path to sweep config YAML file')
+    parser.add_argument('--create-sweep', action='store_true',
+                        help='Use Python config instead of YAML')
+    parser.add_argument('--method', type=str, choices=['bayes', 'grid'], default='bayes',
+                        help='Sweep method when using Python config: bayes (default) or grid')
     parser.add_argument('--name', default=None,
                         help='Custom sweep name (shown in W&B dashboard)')
     parser.add_argument('--project', default='nash-equilibrium',
@@ -65,19 +69,40 @@ def main():
 
     args = parser.parse_args()
 
-    # Validate config file exists
-    if not os.path.exists(args.config):
-        print(f"Error: Config file '{args.config}' not found!")
+    # Validate config source
+    if not args.config and not args.create_sweep:
+        print("Error: Must specify either --config or --create-sweep")
+        sys.exit(1)
+
+    if args.config and args.create_sweep:
+        print("Error: Cannot specify both --config and --create-sweep")
         sys.exit(1)
 
     # Load sweep config
-    print(f"Loading sweep configuration from: {args.config}")
-    try:
-        with open(args.config, 'r') as f:
-            sweep_config = yaml.safe_load(f)
-    except Exception as e:
-        print(f"Error loading config: {e}")
-        sys.exit(1)
+    if args.config:
+        # From YAML file
+        if not os.path.exists(args.config):
+            print(f"Error: Config file '{args.config}' not found!")
+            sys.exit(1)
+
+        print(f"Loading sweep configuration from: {args.config}")
+        try:
+            with open(args.config, 'r') as f:
+                sweep_config = yaml.safe_load(f)
+        except Exception as e:
+            print(f"Error loading config: {e}")
+            sys.exit(1)
+    else:
+        # From Python config
+        from run_sweep import SWEEP_CONFIG, SWEEP_CONFIG_GRID
+
+        if args.method == 'grid':
+            print("Using Python GRID sweep configuration")
+            print(f"  Total grid size: 3 × 5 × 5 = 75 runs")
+            sweep_config = SWEEP_CONFIG_GRID
+        else:
+            print("Using Python BAYES sweep configuration")
+            sweep_config = SWEEP_CONFIG
 
     # Override name if provided via CLI
     if args.name:
@@ -154,6 +179,23 @@ def main():
     print(f"  Workers: {args.num_workers}")
     print(f"  Runs per worker: {args.count_per_worker}")
     print(f"  Total runs: up to {total_runs}")
+
+    # Add note for grid search
+    if sweep_config.get('method') == 'grid':
+        # Count grid size
+        params = sweep_config.get('parameters', {})
+        grid_size = 1
+        for k, v in params.items():
+            if 'values' in v:
+                grid_size *= len(v['values'])
+
+        if total_runs < grid_size:
+            print(f"\n  ⚠️  Note: Grid search has {grid_size} total combinations.")
+            print(f"     Consider running at least {grid_size} total runs for full coverage.")
+        elif total_runs == grid_size:
+            print(f"\n  ✓ Total runs matches grid size ({grid_size}) - full coverage!")
+        else:
+            print(f"\n  Note: Grid has {grid_size} combinations, running {total_runs} (some duplicates expected)")
 
     # Print commands file preview
     print(f"\nCommands file preview ({args.output}):")

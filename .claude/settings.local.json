@@ -10,9 +10,16 @@
       "Bash(grep:*)",
       "Bash(ls:*)",
       "Bash(find:*)",
-      "Bash(xargs -I {} bash -c 'echo \"\"\"\"=== {} ===\"\"\"\" && grep \"\"\"\"^def \"\"\"\" {}')"
+      "Bash(xargs -I {} bash -c 'echo \"\"\"\"=== {} ===\"\"\"\" && grep \"\"\"\"^def \"\"\"\" {}')",
+      "Bash(mkdir:*)",
+      "Bash(tree:*)",
+      "Bash(xargs:*)"
     ],
     "deny": [],
     "ask": []
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bun x ccusage statusline"
   }
 }

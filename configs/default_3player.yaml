@@ -1,0 +1,35 @@
+# Default configuration for 3-player quantum Prisoner's Dilemma
+#
+# Usage:
+#   from solver import train, load_config
+#   config = load_config('configs/default_3player.yaml')
+#   train(**config)
+
+# Intra-orbit Nash equilibrium finding (find_nash_eq1)
+solver:
+  max_iter: 10000           # Max iterations for differential BR dynamics
+  alpha: 0.01               # Learning rate for unitary updates
+  convergence_threshold: 1e-7  # Local exploitability threshold
+  expl_threshold: 5e-4      # Global exploitability threshold to accept equilibrium
+  use_tqdm: false           # Show progress bar
+
+# Inter-orbit optimization (train)
+train:
+  n_steps: 5000             # Number of gradient descent steps
+  lr: 3.2e-3                # Learning rate (scale proportionally to chi^2)
+  mps_bond_dim: 2           # MPS bond dimension
+  max_nash_attempts: 20     # Random restarts for Nash finder
+  log_interval: 100         # Log metrics every N steps
+  save_dir: results         # Directory to save results
+
+# Game definition
+game:
+  num_players: 3
+  type: qpd                 # Quantum Prisoner's Dilemma
+  dtype: float32
+
+# Logging
+logging:
+  use_wandb: true
+  wandb_project: quantum-nash-optimization
+  wandb_run_name: null      # Auto-generated if null

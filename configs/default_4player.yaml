@@ -1,0 +1,35 @@
+# Default configuration for 4-player quantum Prisoner's Dilemma (cyclic graph)
+#
+# Usage:
+#   from solver import train, load_config
+#   config = load_config('configs/default_4player.yaml')
+#   train(**config)
+
+# Intra-orbit Nash equilibrium finding (find_nash_eq1)
+solver:
+  max_iter: 10000           # Max iterations for differential BR dynamics
+  alpha: 0.01               # Learning rate for unitary updates
+  convergence_threshold: 1e-7  # Local exploitability threshold
+  expl_threshold: 5e-4      # Global exploitability threshold to accept equilibrium
+  use_tqdm: false           # Show progress bar
+
+# Inter-orbit optimization (train)
+train:
+  n_steps: 10000            # More steps for larger state space
+  lr: 1e-3                  # Lower learning rate for stability
+  mps_bond_dim: 4           # Higher bond dimension for 4 qubits
+  max_nash_attempts: 30     # More restarts due to larger landscape
+  log_interval: 100         # Log metrics every N steps
+  save_dir: results         # Directory to save results
+
+# Game definition
+game:
+  num_players: 4
+  type: qpd_cyclic          # Cyclic ring topology for 4 players
+  dtype: float32
+
+# Logging
+logging:
+  use_wandb: true
+  wandb_project: quantum-nash-optimization
+  wandb_run_name: null      # Auto-generated if null

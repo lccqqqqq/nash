@@ -2,362 +2,516 @@
 
 ## Overview
 
-This document outlines a refactoring plan to clearly separate and highlight the two core Nash equilibrium finding algorithms in the quantum game theory codebase.
+Refactoring to clearly separate the two core Nash equilibrium algorithms while using a simple function-based design suitable for research code.
 
-## Current Architecture Issues
+## Core Algorithms
 
-1. **Mixed responsibilities**: The `train()` function combines inter-orbit optimization with intra-orbit refinement
-2. **Unclear algorithm boundaries**: The two core algorithms (within/across orbits) are not clearly distinguished
-3. **Code duplication**: Similar logic exists in `opt_mps_fiducial_state.py` and `solver.py`
-4. **Terminology confusion**: "Nash equilibrium finding" sometimes refers to local search, sometimes to global optimization
+**Two Fundamental Algorithms (both in `solver.py`)**:
 
-## Proposed Architecture
+1. **`find_nash_eq1()`** - Intra-Orbit Nash Finding
+   - Finds Nash equilibria using local unitary transformations
+   - Preserves entanglement structure (stays within orbit)
+   - Uses differential best response dynamics
 
-### Core Concepts
+2. **`train()`** - Inter-Orbit Optimization
+   - Optimizes fiducial state across different orbits
+   - Changes entanglement structure via gradient descent on MPS parameters
+   - Calls `find_nash_eq1()` for refinement within each orbit
 
-**Orbit**: The set of all quantum states reachable from a given state by applying local unitary transformations to each player's subsystem. States in the same orbit have identical entanglement structure.
-
-**Two Fundamental Algorithms**:
-
-1. **Intra-Orbit Nash Finding** (Local Search)
-   - **Input**: A quantum state (MPS representation)
-   - **Output**: A Nash equilibrium within the same unitary orbit
-   - **Method**: Differential best response dynamics using local unitary transformations
-   - **Current implementation**: `find_nash_eq()`, `find_nash_eq1()`
-   - **Constraint**: Preserves entanglement structure (stays within orbit)
-
-2. **Inter-Orbit Optimization** (Global Search)
-   - **Input**: Starting state + objective function (e.g., maximize welfare)
-   - **Output**: Optimized state in a different orbit
-   - **Method**: Gradient-based optimization (Adam) on MPS parameters
-   - **Current implementation**: Gradient ascent loop in `train()`
-   - **Freedom**: Can change entanglement structure (moves between orbits)
-
-### Proposed Module Structure
+## Proposed Directory Structure
 
 ```
 nash/
-├── core_algorithms/
+├── solver.py                 # Core algorithms: find_nash_eq1(), train()
+│
+├── src/                      # Logically important source code
 │   ├── __init__.py
-│   ├── intra_orbit.py       # IntraOrbitNashFinder class
-│   ├── inter_orbit.py       # InterOrbitOptimizer class
-│   └── configs.py           # Configuration classes
-├── opt_mps_fiducial_state.py  # Refactored to use core algorithms
-├── solver.py                   # Refactored to use core algorithms
-└── ...
+│   ├── mps_utils.py          # MPS manipulation (canonical form, random states)
+│   ├── tensor_ops.py         # Tensor network operations (from misc.py)
+│   ├── game.py               # Game definitions (Hamiltonians, payoffs)
+│   └── entanglement.py       # Entanglement parameter calculations
+│
+├── tests/                    # Pytest test suite
+│   ├── __init__.py
+│   ├── test_solver.py        # Core solver tests
+│   ├── test_solver_4qubit.py # 4-qubit system tests
+│   ├── test_misc_torch.py    # NumPy/PyTorch equivalence tests
+│   ├── test_game.py          # Game definition tests
+│   ├── test_consistencies.py # Cross-module consistency tests
+│   ├── test_5players.py      # Multi-player (5+) tests
+│   ├── test_seed.py          # Reproducibility tests
+│   └── test_save_load.py     # Persistence tests
+│
+├── utils/                    # Engineering utilities
+│   ├── __init__.py
+│   ├── data_io.py            # Loading/saving results, pickle handling
+│   ├── mpi_utils.py          # MPI distributed computing helpers
+│   └── wandb_utils.py        # Weights & Biases logging helpers
+│
+├── notebooks/                # Interactive exploration (Jupyter)
+│   ├── qpd_data_analysis.ipynb
+│   ├── qpd_4players.ipynb
+│   ├── qpd.ipynb
+│   └── ...
+│
+├── configs/                  # Configuration files
+│   ├── default_3player.yaml
+│   ├── default_4player.yaml
+│   └── sweep_configs/
+│       ├── sweep_config.yaml
+│       ├── sweep_config_lronly.yaml
+│       └── sweep_example_simple.yaml
+│
+├── experiments/              # Job submission and sweep scripts
+│   ├── run_3player.sh        # SLURM job script for 3-player
+│   ├── run_sweep.py          # W&B sweep runner
+│   └── setup_cluster_sweep.py # Cluster sweep setup utility
+│
+├── README.md
+├── requirements.txt
+└── CLAUDE.md
 ```
 
-## Detailed Design
-
-### 1. `core_algorithms/intra_orbit.py`
+## Core `solver.py` Design
 
 ```python
-class IntraOrbitNashFinder:
-    """
-    Finds Nash equilibria within a unitary orbit using differential best response dynamics.
+"""
+Core Nash equilibrium algorithms for quantum games.
 
-    This algorithm applies local unitary transformations to each player's subsystem
-    until no player can improve their payoff through further local unitaries.
+Two main algorithms:
+1. find_nash_eq1() - Find NE within a unitary orbit (local search)
+2. train() - Optimize fiducial state across orbits (global search)
+"""
 
-    The algorithm preserves the entanglement structure of the input state.
-    """
+import numpy as np
+from dataclasses import dataclass
+from typing import Callable
 
-    def __init__(self, config: IntraOrbitConfig):
-        self.max_iter = config.max_iter
-        self.alpha = config.alpha  # Learning rate for unitary updates
-        self.convergence_threshold = config.convergence_threshold
-        self.trace_history = config.trace_history
+from src.mps_utils import to_canonical_form, to_comp_basis, get_rand_mps
+from src.tensor_ops import apply_unitary, mps_overlap
+from src.game import get_default_H
+from src.entanglement import compute_entanglement_params
 
-    def find_equilibrium(
-        self,
-        Psi: list[Tensor],  # MPS tensors
-        H: list[Tensor],    # Hamiltonian for each player
-    ) -> NashEquilibriumResult:
-        """
-        Apply differential best response dynamics to find a Nash equilibrium.
 
-        Algorithm:
-        1. For each iteration:
-           - Compute energy gradient w.r.t. local unitaries for each player
-           - Extract unitary updates via SVD of gradient matrix
-           - Apply all unitaries simultaneously (synchronous update)
-        2. Converge when local exploitability < threshold
+# ============================================================================
+# Configuration
+# ============================================================================
 
-        Returns:
-            NashEquilibriumResult containing:
-            - final_state: Nash equilibrium state
-            - energies: Payoffs for each player
-            - converged: Whether algorithm converged
-            - num_iterations: Number of iterations taken
-            - local_exploitability: Final exploitability measure
-            - history: Trajectory (if trace_history=True)
-        """
-        pass
-
-    def compute_local_exploitability(self, Psi, H) -> float:
-        """
-        Compute local exploitability from infinitesimal unitary perturbations.
-
-        This is the convergence criterion for differential best response.
-        """
-        pass
-
-    def compute_unitary_update(self, Psi, H, player_idx) -> Tensor:
-        """
-        Compute unitary update for a single player using gradient + SVD.
-
-        Returns a unitary matrix that increases player's payoff.
-        """
-        pass
-```
-
-### 2. `core_algorithms/inter_orbit.py`
-
-```python
-class InterOrbitOptimizer:
-    """
-    Optimizes quantum states across different unitary orbits using gradient descent.
-
-    This algorithm can change the entanglement structure of the state by directly
-    optimizing the MPS tensor parameters.
-    """
-
-    def __init__(self, config: InterOrbitConfig):
-        self.n_steps = config.n_steps
-        self.lr = config.lr
-        self.optimizer_type = config.optimizer_type  # 'adam', 'sgd', etc.
-        self.objective = config.objective  # 'welfare', 'nash_welfare', etc.
-        self.use_nash_refinement = config.use_nash_refinement
-
-        # Reference to intra-orbit finder for refinement
-        self.nash_finder = IntraOrbitNashFinder(config.nash_config) if self.use_nash_refinement else None
-
-    def optimize(
-        self,
-        initial_state: list[Tensor],
-        H: list[Tensor],
-        objective_fn: Callable = None,
-    ) -> OptimizationResult:
-        """
-        Optimize MPS state to maximize objective function.
-
-        Algorithm:
-        1. For each optimization step:
-           - Compute objective (e.g., sum of energies)
-           - Backpropagate gradients to MPS parameters
-           - Update parameters via optimizer (Adam/SGD)
-           - [Optional] Refine to Nash equilibrium within new orbit
-        2. Return trajectory of states and objective values
-
-        Returns:
-            OptimizationResult containing:
-            - final_state: Optimized state
-            - trajectory: States at each iteration
-            - objective_values: Objective function values
-            - nash_equilibria: Nash equilibria at each step (if refinement enabled)
-        """
-        pass
-
-    def compute_objective(self, Psi, H, objective_type='welfare') -> Tensor:
-        """
-        Compute objective function to be maximized.
-
-        Options:
-        - 'welfare': Sum of all players' energies
-        - 'nash_welfare': Product of energies (Nash social welfare)
-        - 'min_energy': Minimum player energy (egalitarian)
-        - 'custom': User-provided objective function
-        """
-        pass
-
-    def refine_to_nash(self, Psi, H) -> list[Tensor]:
-        """
-        Refine current state to Nash equilibrium using IntraOrbitNashFinder.
-
-        This projects the gradient-optimized state onto the nearest Nash equilibrium
-        within its current orbit.
-        """
-        if self.nash_finder is None:
-            return Psi
-        result = self.nash_finder.find_equilibrium(Psi, H)
-        return result.final_state
-```
-
-### 3. `core_algorithms/configs.py`
-
-```python
 @dataclass
-class IntraOrbitConfig:
+class SolverConfig:
     """Configuration for intra-orbit Nash equilibrium finding."""
     max_iter: int = 10000
-    alpha: float = 10.0  # Learning rate for unitary updates
-    convergence_threshold: float = 1e-6  # Local exploitability threshold
+    alpha: float = 0.01           # Learning rate for unitary updates
+    convergence_threshold: float = 1e-7
+    expl_threshold: float = 5e-4  # Global exploitability threshold
+    use_tqdm: bool = False
     trace_history: bool = False
-    validate_with_global_expl: bool = True
-    global_expl_samples: int = 10000
-    global_expl_threshold: float = 1e-3
+
 
 @dataclass
-class InterOrbitConfig:
+class TrainConfig:
     """Configuration for inter-orbit optimization."""
     n_steps: int = 2000
     lr: float = 0.01
-    optimizer_type: str = 'adam'  # 'adam', 'sgd', 'rmsprop'
-    objective: str = 'welfare'  # 'welfare', 'nash_welfare', 'min_energy'
-
-    # Nash refinement settings
-    use_nash_refinement: bool = True
-    nash_config: IntraOrbitConfig = field(default_factory=IntraOrbitConfig)
-    nash_refinement_frequency: int = 1  # Refine every N steps
-    max_nash_attempts: int = 20  # Multiple restarts for Nash finder
-
-@dataclass
-class HybridOptimizationConfig:
-    """Configuration for hybrid optimization (inter + intra)."""
-    inter_orbit_config: InterOrbitConfig
-    intra_orbit_config: IntraOrbitConfig
-
-    # Data configuration
     mps_bond_dim: int = 2
-    initial_state: list[Tensor] | None = None
+
+    # Nash refinement
+    solver_config: SolverConfig = None  # Uses default if None
+    max_nash_attempts: int = 20
 
     # Logging
     use_wandb: bool = True
     wandb_project: str = 'quantum-nash-optimization'
-    log_interval: int = 1
+    log_interval: int = 100
+    save_dir: str = 'results'
+
+
+# ============================================================================
+# Intra-Orbit Nash Finding
+# ============================================================================
+
+def find_nash_eq1(
+    Psi: list[np.ndarray] | np.ndarray,
+    H: list[np.ndarray],
+    config: SolverConfig = None,
+) -> dict:
+    """
+    Find Nash equilibrium within a unitary orbit using differential best response.
+
+    This algorithm applies local unitary transformations to each player's subsystem
+    until no player can improve their payoff. The entanglement structure is preserved.
+
+    Args:
+        Psi: Initial state (MPS tensors or computational basis array)
+        H: List of Hamiltonian tensors, one per player
+        config: Solver configuration (uses defaults if None)
+
+    Returns:
+        dict with keys:
+            - 'state': Final MPS tensors at Nash equilibrium
+            - 'energies': Payoffs for each player
+            - 'converged': Whether algorithm converged
+            - 'num_iters': Number of iterations taken
+            - 'local_expl': Final local exploitability
+            - 'global_expl': Global exploitability (if validated)
+            - 'history': Energy trajectory (if trace_history=True)
+
+    Algorithm:
+        1. Compute energy gradient w.r.t. local unitaries for each player
+        2. Extract unitary update via SVD: U = (V @ Wh).T.conj()
+        3. Apply all unitaries simultaneously (synchronous update)
+        4. Converge when local exploitability < threshold
+    """
+    if config is None:
+        config = SolverConfig()
+
+    # ... implementation ...
+
+
+def compute_exploitability(psi: np.ndarray, H: list[np.ndarray], player_idx: int) -> float:
+    """
+    Compute global exploitability for a single player.
+
+    Uses differential evolution to find the maximum payoff gain from
+    unilateral deviation in the exp(iY) direction.
+
+    Args:
+        psi: Quantum state in computational basis
+        H: List of Hamiltonians
+        player_idx: Index of player to compute exploitability for
+
+    Returns:
+        Maximum payoff gain from deviation (0 if at equilibrium)
+    """
+    # ... implementation ...
+
+
+def compute_energies(Psi: list[np.ndarray] | np.ndarray, H: list[np.ndarray]) -> np.ndarray:
+    """
+    Compute expected payoffs for all players.
+
+    Args:
+        Psi: State (MPS or computational basis)
+        H: Stacked Hamiltonian
+
+    Returns:
+        Array of energies, one per player
+    """
+    # ... implementation ...
+
+
+# ============================================================================
+# Inter-Orbit Optimization
+# ============================================================================
+
+def train(
+    H: list[np.ndarray] = None,
+    config: TrainConfig = None,
+    initial_state: list[np.ndarray] = None,
+) -> dict:
+    """
+    Optimize fiducial state across orbits to find high-welfare Nash equilibria.
+
+    This algorithm uses gradient descent on MPS parameters to explore different
+    entanglement structures, with Nash refinement at each step.
+
+    Args:
+        H: Game Hamiltonians (uses default QPD if None)
+        config: Training configuration
+        initial_state: Starting MPS (random if None)
+
+    Returns:
+        dict with keys:
+            - 'final_state': Best Nash equilibrium found
+            - 'trajectory': DataFrame with full optimization history
+            - 'best_welfare': Maximum welfare achieved
+            - 'entanglement_params': Entanglement invariants at each step
+
+    Algorithm:
+        For each optimization step:
+        1. Compute energies and gradients w.r.t. MPS parameters
+        2. Update MPS via Adam optimizer (maximize welfare)
+        3. Convert to canonical form
+        4. Refine to Nash equilibrium using find_nash_eq1()
+        5. Log metrics and save checkpoints
+    """
+    if config is None:
+        config = TrainConfig()
+    if H is None:
+        H = get_default_H(n_players=3)
+
+    # ... implementation ...
+
+
+# ============================================================================
+# Convenience Functions
+# ============================================================================
+
+def find_all_equilibria(
+    Psi: list[np.ndarray],
+    H: list[np.ndarray],
+    n_restarts: int = 20,
+    config: SolverConfig = None,
+) -> list[dict]:
+    """
+    Find multiple Nash equilibria using random restarts.
+
+    Useful for exploring the equilibrium landscape within an orbit.
+    """
+    # ... implementation ...
+
+
+def validate_nash_equilibrium(
+    Psi: list[np.ndarray],
+    H: list[np.ndarray],
+    threshold: float = 1e-3,
+) -> tuple[bool, np.ndarray]:
+    """
+    Validate that a state is a Nash equilibrium.
+
+    Returns:
+        (is_nash, exploitabilities): Tuple of validation result and per-player exploitabilities
+    """
+    # ... implementation ...
 ```
 
-### 4. Result Data Classes
+## Source Code Organization (`src/`)
 
+### `src/mps_utils.py`
 ```python
-@dataclass
-class NashEquilibriumResult:
-    """Result from intra-orbit Nash equilibrium finding."""
-    final_state: list[Tensor]
-    energies: list[float]
-    converged: bool
-    num_iterations: int
-    local_exploitability: float
-    global_exploitability: list[float] | None = None
-    history: dict | None = None  # Energy trajectories, etc.
+"""Matrix Product State utilities."""
 
-@dataclass
-class OptimizationResult:
-    """Result from inter-orbit optimization."""
-    final_state: list[Tensor]
-    trajectory: list[list[Tensor]]
-    objective_values: list[float]
-    energies_history: list[list[float]]
-    nash_equilibria: list[NashEquilibriumResult] | None = None
-    entanglement_params: list[np.ndarray] | None = None
+def get_rand_mps(L: int, chi: int, dtype=np.complex128, seed=None) -> list[np.ndarray]:
+    """Generate random MPS with given bond dimension."""
+
+def to_canonical_form(Psi: list[np.ndarray], center: int = 0) -> list[np.ndarray]:
+    """Convert MPS to mixed canonical form."""
+
+def to_comp_basis(Psi: list[np.ndarray]) -> np.ndarray:
+    """Contract MPS to full state vector."""
+
+def from_comp_basis(psi: np.ndarray, chi: int) -> list[np.ndarray]:
+    """Convert state vector to MPS via SVD."""
+
+def get_product_state(angles: list[float]) -> list[np.ndarray]:
+    """Create product state MPS from Bloch sphere angles."""
+
+def get_ghz_state(L: int) -> list[np.ndarray]:
+    """Create GHZ state as MPS."""
+
+def apply_random_unitaries(Psi: list[np.ndarray]) -> list[np.ndarray]:
+    """Apply random local unitaries to each site."""
 ```
 
-## Migration Strategy
+### `src/tensor_ops.py`
+```python
+"""Tensor network operations (extracted from misc.py)."""
 
-### Phase 1: Create Core Algorithms Module (No Breaking Changes)
+def apply_unitary(U: np.ndarray, A: np.ndarray) -> np.ndarray:
+    """Apply unitary to physical leg of MPS tensor."""
 
-1. Create `core_algorithms/` directory
-2. Implement `IntraOrbitNashFinder` by extracting logic from `find_nash_eq()`
-3. Implement `InterOrbitOptimizer` by extracting logic from `train()`
-4. Keep existing functions as thin wrappers calling the new classes
+def mps_overlap(Psi1: list, Psi2: list) -> complex:
+    """Compute inner product of two MPS."""
 
-**Benefit**: New code is cleaner, old code still works
+def compress(Psi: list, chi_max: int) -> list:
+    """Compress MPS to given bond dimension via SVD."""
 
-### Phase 2: Refactor Main Scripts
+def mps_2form(Psi: list, center: int = 0) -> list:
+    """Convert to mixed canonical form centered at given site."""
+```
 
-1. Update `opt_mps_fiducial_state.py`:
-   ```python
-   def train(config: HybridOptimizationConfig):
-       optimizer = InterOrbitOptimizer(config.inter_orbit_config)
-       result = optimizer.optimize(
-           initial_state=get_initial_state(config),
-           H=config.H,
-       )
-       return result
-   ```
+### `src/game.py`
+```python
+"""Quantum game definitions."""
 
-2. Update `solver.py`:
-   ```python
-   def solve_nash_equilibrium(Psi, H, config: IntraOrbitConfig):
-       finder = IntraOrbitNashFinder(config)
-       result = finder.find_equilibrium(Psi, H)
-       return result
-   ```
+def get_default_H(n_players: int = 3, game: str = 'qpd') -> list[np.ndarray]:
+    """Get default Hamiltonian for quantum Prisoner's Dilemma."""
 
-3. Update tests to use new APIs
+def canonical_qpd(n_players: int) -> list[np.ndarray]:
+    """Canonical QPD payoff structure."""
 
-### Phase 3: Add New Capabilities
+def get_hamiltonian_from_payoffs(payoffs: np.ndarray) -> list[np.ndarray]:
+    """Convert payoff tensor to Hamiltonian list."""
+```
 
-Once core algorithms are separated, easily add:
+### `src/entanglement.py`
+```python
+"""Entanglement parameter calculations."""
 
-1. **Different inter-orbit optimizers**: Not just Adam, but also:
-   - CMA-ES for derivative-free optimization
-   - Natural gradient methods
-   - Trust region methods
+def compute_entanglement_params(psi: np.ndarray, option: str = 'I') -> np.ndarray:
+    """
+    Compute 5 entanglement invariants for 3-qubit state.
 
-2. **Different intra-orbit finders**: Not just differential BR, but also:
-   - Fictitious play
-   - Replicator dynamics
-   - Best response iterations
+    Args:
+        psi: State vector (shape 2x2x2 or flattened)
+        option: 'I' for invariants, 'J' for derived parameters
 
-3. **Hybrid strategies**:
-   - Alternating between inter and intra-orbit optimization
-   - Multi-start global optimization
-   - Curriculum learning (start with simple games)
+    Returns:
+        Array of 5 parameters: [I1, I2, I3, I4, I5]
+        - I1, I2, I3: Single-party purities
+        - I4: Two-party correlation
+        - I5: Three-tangle (genuine tripartite entanglement)
+    """
 
-## Benefits of Refactoring
+def compute_purity(rho: np.ndarray) -> float:
+    """Compute purity Tr(rho^2) of density matrix."""
 
-1. **Conceptual clarity**: The two core algorithms are clearly distinguished
-2. **Modularity**: Each algorithm can be tested, improved, and replaced independently
-3. **Reusability**: Core algorithms can be used in different contexts (not just `train()`)
-4. **Extensibility**: Easy to add new optimization methods or Nash finding algorithms
-5. **Better testing**: Each component can be unit tested separately
-6. **Scientific clarity**: Aligns code structure with mathematical concepts (orbits)
+def partial_trace(psi: np.ndarray, keep: list[int]) -> np.ndarray:
+    """Compute reduced density matrix by tracing out specified subsystems."""
+```
 
-## Open Questions for Discussion
+## Utilities Organization (`utils/`)
 
-1. **Naming**: Do you prefer `IntraOrbit`/`InterOrbit` or `LocalSearch`/`GlobalSearch`?
-2. **Return types**: Should we use dataclasses or dictionaries for results?
-3. **Backward compatibility**: Should we keep old function signatures as aliases?
-4. **Validation**: Should Nash refinement validate exploitability by default?
-5. **Multi-player generalization**: Should we design for arbitrary number of players from the start?
+### `utils/mpi_utils.py`
+```python
+"""MPI utilities for distributed computing."""
 
-## Example Usage (After Refactoring)
+def get_mpi_info() -> tuple[int, int]:
+    """Return (rank, size) for current MPI process."""
+
+def distribute_work(items: list, rank: int, size: int) -> list:
+    """Distribute work items across MPI ranks."""
+
+def gather_results(local_results: list, comm) -> list:
+    """Gather results from all ranks to rank 0."""
+```
+
+### `utils/data_io.py`
+```python
+"""Data loading and saving utilities."""
+
+def save_results(results: dict, filepath: str):
+    """Save results to pickle file with metadata."""
+
+def load_results(filepath: str) -> dict:
+    """Load results from pickle file."""
+
+def concatenate_results(filepaths: list[str]) -> dict:
+    """Concatenate results from multiple files (e.g., MPI outputs)."""
+
+def results_to_dataframe(results: dict) -> pd.DataFrame:
+    """Convert results dictionary to pandas DataFrame."""
+```
+
+### `utils/wandb_utils.py`
+```python
+"""Weights & Biases logging utilities."""
+
+def init_wandb(config: dict, project: str, run_name: str = None):
+    """Initialize W&B run with configuration."""
+
+def log_step(step: int, metrics: dict):
+    """Log metrics for a training step."""
+
+def log_equilibrium(eq_result: dict, step: int):
+    """Log Nash equilibrium result."""
+
+def finish_run():
+    """Finish W&B run and upload final artifacts."""
+```
+
+## Configuration Files (`configs/`)
+
+### `configs/default_3player.yaml`
+```yaml
+# Default configuration for 3-player quantum Prisoner's Dilemma
+
+solver:
+  max_iter: 10000
+  alpha: 0.01
+  convergence_threshold: 1e-7
+  expl_threshold: 5e-4
+
+train:
+  n_steps: 5000
+  lr: 3.2e-3
+  mps_bond_dim: 2
+  max_nash_attempts: 20
+  log_interval: 100
+
+game:
+  n_players: 3
+  type: qpd
+```
+
+## Experiment Scripts (`experiments/`)
+
+### `experiments/run_3player.sh`
+```bash
+#!/bin/bash
+#SBATCH --job-name=nash_3p
+#SBATCH --output=logs/%j.out
+#SBATCH --time=4:00:00
+#SBATCH --mem=8G
+
+source .venv/bin/activate
+python -c "
+from solver import train
+from configs import load_config
+
+config = load_config('configs/default_3player.yaml')
+train(config=config)
+"
+```
+
+## Migration Plan
+
+### Phase 1: Reorganize Files ✅ COMPLETE
+
+1. Create directory structure
+2. Move existing code to appropriate locations:
+   - `find_nash_eq1()` and `train()` → keep in `solver.py` (already there)
+   - MPS utilities → `src/mps_utils.py`
+   - Tensor operations → `src/tensor_ops.py`
+   - Game definitions → `src/game.py`
+   - Entanglement calculations → `src/entanglement.py`
+   - Tests → `tests/`
+   - Notebooks → `notebooks/`
+   - Sweep scripts → `experiments/`
+   - Sweep configs → `configs/sweep_configs/`
+3. Move deprecated code to `old/`:
+   - `opt_mps_fiducial_state.py` (PyTorch trainer, superseded by solver.py)
+   - `misc_torch.py`, `mps_utils_torch.py`, `game_torch.py` (deprecated PyTorch versions)
+
+### Phase 2: NOT NEEDED
+
+The core algorithms `find_nash_eq1()` and `train()` are already consolidated in `solver.py`.
+No further code consolidation required.
+
+## Benefits
+
+1. **Clear separation**: Core algorithms in one file (`solver.py`)
+2. **Simpler design**: Functions instead of classes
+3. **Research-friendly**: Easy to modify and experiment
+4. **Reproducible**: Config files + experiment scripts
+5. **Modular**: Source code separated from utilities
+6. **Testable**: Notebooks for interactive testing and visualization
+
+## Example Usage
 
 ```python
-from core_algorithms import IntraOrbitNashFinder, InterOrbitOptimizer
-from core_algorithms.configs import IntraOrbitConfig, InterOrbitConfig
+# Simple intra-orbit Nash finding
+from solver import find_nash_eq1, SolverConfig
+from src.mps_utils import get_rand_mps
+from src.game import get_default_H
 
-# Example 1: Find Nash equilibrium within current orbit
-config = IntraOrbitConfig(alpha=10, convergence_threshold=1e-6)
-finder = IntraOrbitNashFinder(config)
-result = finder.find_equilibrium(Psi, H)
-print(f"Converged: {result.converged}, Exploitability: {result.local_exploitability}")
+Psi = get_rand_mps(L=3, chi=2)
+H = get_default_H(n_players=3)
 
-# Example 2: Optimize across orbits with Nash refinement
-inter_config = InterOrbitConfig(
+result = find_nash_eq1(Psi, H)
+print(f"Converged: {result['converged']}")
+print(f"Energies: {result['energies']}")
+print(f"Exploitability: {result['global_expl']}")
+
+
+# Full optimization across orbits
+from solver import train, TrainConfig
+
+config = TrainConfig(
     n_steps=5000,
     lr=3.2e-3,
-    use_nash_refinement=True,
-    nash_config=IntraOrbitConfig(alpha=10, convergence_threshold=1e-6)
-)
-optimizer = InterOrbitOptimizer(inter_config)
-result = optimizer.optimize(initial_state=Psi_init, H=H)
-
-# Example 3: Hybrid optimization (legacy interface)
-hybrid_config = HybridOptimizationConfig(
-    inter_orbit_config=inter_config,
-    intra_orbit_config=config,
     mps_bond_dim=2,
 )
-train(hybrid_config)  # Refactored to use core algorithms
+result = train(config=config)
+print(f"Best welfare: {result['best_welfare']}")
 ```
-
-## Next Steps
-
-1. Review and approve this refactoring plan
-2. Decide on naming conventions and API details
-3. Implement Phase 1 (core algorithms module)
-4. Test with existing experiments
-5. Gradually migrate existing scripts (Phase 2)
-6. Add new capabilities (Phase 3)

@@ -18,11 +18,19 @@ import argparse
 import pickle
 import uuid
 
-from opt_mps_fiducial_state import apply_unitary
-from mps_utils import to_canonical_form, to_comp_basis, get_rand_mps, get_product_state, get_ghz_state, apply_random_unitaries, test_canonical_form
-from IPython.display import HTML, display
-from game import get_default_3players, get_default_2players, get_default_H
-import sys
+# Import from refactored src/ modules
+from src.mps_utils import (
+    apply_unitary,
+    to_canonical_form,
+    to_comp_basis,
+    get_rand_mps,
+    get_product_state,
+    get_ghz_state,
+    apply_random_unitaries,
+    test_canonical_form
+)
+from src.game import get_default_3players, get_default_2players, get_default_H
+from src.entanglement import compute_entanglement_params as compute_ent_params_from_state
 
 
 # Pre-computed Pauli matrices and tensor products for unitary perturbations

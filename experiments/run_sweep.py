@@ -133,7 +133,7 @@ def train_sweep():
             wandb_project=config.get('wandb_project', 'nash-equilibrium'),
             wandb_config={'sweep_run': True, 'seed': seed},
             wandb_log_interval=config.get('wandb_log_interval', 20),  # Log every 20 steps by default for sweeps
-            save_results=config.get('save_results', True),
+            should_save_results=config.get('save_results', True),
             save_dir=config.get('save_dir', 'data'),
             seed=seed,  # Pass seed for metadata tracking
         )

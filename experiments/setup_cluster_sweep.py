@@ -58,7 +58,7 @@ def main():
     # Cluster configuration
     parser.add_argument('--num-workers', type=int, default=10,
                         help='Number of parallel workers/machines')
-    parser.add_argument('--count-per-worker', type=int, default=10,
+    parser.add_argument('--count-per-worker', type=int, default=1,
                         help='Number of runs each worker should execute')
 
     # Output files
@@ -165,7 +165,7 @@ def main():
     try:
         with open(args.output, 'w') as f:
             for i in range(args.num_workers):
-                cmd = f"/usr/bin/python3 run_sweep.py --sweep-id {sweep_id} --count {args.count_per_worker}"
+                cmd = f"/usr/bin/python3 experiments/run_sweep.py --sweep-id {sweep_id} --count {args.count_per_worker}"
                 if args.project != 'nash-equilibrium':
                     cmd += f" --project {args.project}"
                 if args.entity:

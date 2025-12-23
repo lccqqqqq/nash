@@ -1,0 +1,4 @@
+/usr/bin/python3 experiments/run_sweep.py --sweep-id x36uqhvk --count 1
+/usr/bin/python3 experiments/run_sweep.py --sweep-id x36uqhvk --count 1
+/usr/bin/python3 experiments/run_sweep.py --sweep-id x36uqhvk --count 1
+/usr/bin/python3 experiments/run_sweep.py --sweep-id x36uqhvk --count 1

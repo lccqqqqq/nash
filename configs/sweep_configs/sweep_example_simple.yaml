@@ -17,14 +17,14 @@ parameters:
     values: [0.01, 0.02]
 
   num_perturbations:
-    values: [5, 10]
+    value: 10
 
   # Fixed parameters
   max_num_steps:
     value: 50  # Shorter for quick testing
 
   subroutine_lr:
-    value: 0.03
+    value: 0.06
 
   subroutine_max_iter:
     value: 1000

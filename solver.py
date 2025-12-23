@@ -23,6 +23,7 @@ from src.mps_utils import (
     apply_unitary,
     to_canonical_form,
     to_comp_basis,
+    from_comp_basis,
     get_rand_mps,
     get_product_state,
     get_ghz_state,
@@ -60,6 +61,11 @@ REAL_PAULI_GENERATORS = np.array([
     np.kron(iY, sigma_z),   # i(Y⊗Z)
     np.kron(sigma_z, iY),   # i(Z⊗Y)
 ], dtype=np.float64)  # Shape: (4, 4, 4)
+
+
+def is_mps_format(state):
+    """Check if state is MPS format (list of tensors) or computational basis (single array)."""
+    return isinstance(state, list)
 
 
 # Functions that compute the Nash equilibrium (using a local algorithm) and verify by computing the exploitability with differential evolution. This is doable because we are dealing with a small parameter space, and considering deviation only in the exp(iY) direction.
@@ -179,28 +185,46 @@ def find_nash_eq1(
 
     return result
 
-def perturb_state(Psi: list[t.Tensor] | list[np.ndarray], lr: float = 0.01, site: int = 0, method: str = 'schmidt'):
+def perturb_state(Psi: list[t.Tensor] | list[np.ndarray] | np.ndarray, lr: float = 0.01, site: int = 0, method: str = 'schmidt'):
     """
     Perturb the state using one of two methods:
 
     - 'schmidt': Left-canonicalize and perturb singular values at specified bond
     - 'unitary': Apply random two-site unitary via Cayley transform
 
-    Some overhead as we are reusing the batch_perturb function.
+    Supports both MPS (list of tensors) and computational basis (single array) inputs.
+    Output format matches input format.
 
     Returns:
         For 'schmidt': (new_Psi, original_S, batch_perturbed_S)
         For 'unitary': (new_Psi, original_coefs, batch_coefs)
     """
-    if isinstance(Psi[0], t.Tensor):
-        Psi = [p.cpu().numpy() for p in Psi]
+    # Detect input format
+    input_is_mps = is_mps_format(Psi)
+
+    if input_is_mps:
+        # Handle PyTorch tensors
+        if isinstance(Psi[0], t.Tensor):
+            Psi_mps = [p.cpu().numpy() for p in Psi]
+        else:
+            Psi_mps = Psi
     else:
-        Psi = Psi
-    Psi_batch, original_param, batch_perturbed_param = batch_perturb(Psi, batch_size=1, lr=lr, site=site, method=method)
-    new_Psi = [Psi_batch[i][0] for i in range(len(Psi_batch))]
+        # Convert computational basis to MPS
+        L = int(np.log2(Psi.size))
+        Psi_mps = from_comp_basis(Psi, L=L)
+
+    Psi_batch, original_param, batch_perturbed_param = batch_perturb(Psi_mps, batch_size=1, lr=lr, site=site, method=method)
+    new_Psi_mps = [Psi_batch[i][0] for i in range(len(Psi_batch))]
+
+    # Convert back to original format if needed
+    if not input_is_mps:
+        new_Psi = to_comp_basis(new_Psi_mps)
+    else:
+        new_Psi = new_Psi_mps
+
     return new_Psi, original_param, batch_perturbed_param
 
-def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100, lr: float = 0.01, site: int = 0, method: str = 'schmidt'):
+def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray] | np.ndarray, batch_size: int = 100, lr: float = 0.01, site: int = 0, method: str = 'schmidt'):
     """
     Perturb the MPS state using one of two methods:
 
@@ -209,24 +233,36 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
                  For real inputs: uses 4 generators (X⊗Y, Y⊗X, Y⊗Z, Z⊗Y) that preserve real dtype
                  For complex inputs: uses all 9 two-qubit Pauli generators
 
+    Supports both MPS (list of tensors) and computational basis (single array) inputs.
+    Output format matches input format.
+
     Args:
-        Psi: MPS state (list of tensors)
+        Psi: MPS state (list of tensors) or computational basis state (array of 2^L elements)
         batch_size: Number of perturbed states to generate
         lr: Learning rate (perturbation strength)
         site: Site index where perturbation is applied
         method: 'schmidt' or 'unitary'
 
     Returns:
-        For 'schmidt': (Psi_batch, original_S, batch_perturbed_S)
-        For 'unitary': (Psi_batch, original_coefs, batch_coefs)
-            - For real inputs: coefs are shape (batch_size, 4)
-            - For complex inputs: coefs are shape (batch_size, 9)
+        For MPS input:
+            For 'schmidt': (Psi_batch, original_S, batch_perturbed_S) where Psi_batch is list of batched MPS tensors
+            For 'unitary': (Psi_batch, original_coefs, batch_coefs)
+        For comp basis input:
+            (Psi_batch, original_param, batch_perturbed_param) where Psi_batch is stacked array (batch_size, 2^L)
     """
-    # Convert to numpy if needed
-    if isinstance(Psi[0], t.Tensor):
-        Psi_np = [p.cpu().numpy() for p in Psi]
+    # Detect input format
+    input_is_mps = is_mps_format(Psi)
+
+    # Convert to MPS numpy format
+    if input_is_mps:
+        if isinstance(Psi[0], t.Tensor):
+            Psi_np = [p.cpu().numpy() for p in Psi]
+        else:
+            Psi_np = Psi
     else:
-        Psi_np = Psi
+        # Convert computational basis to MPS
+        L = int(np.log2(Psi.size))
+        Psi_np = from_comp_basis(Psi, L=L)
 
     if method == 'schmidt':
         # Original Schmidt value perturbation method
@@ -263,6 +299,14 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
                     batch_perturbed_S if j == site else S, Vh, Psi_batch[j+1],
                     'batch bond_r, batch bond_r chi_l, batch d_phys chi_l chi_r -> batch d_phys bond_r chi_r'
                 )
+
+        # Convert back to computational basis if input was comp basis
+        if not input_is_mps:
+            Psi_batch_comp = []
+            for b in range(batch_size):
+                Psi_sample = [Psi_batch[s][b] for s in range(len(Psi_batch))]
+                Psi_batch_comp.append(to_comp_basis(Psi_sample))
+            return np.stack(Psi_batch_comp), original_S, batch_perturbed_S
 
         return Psi_batch, original_S, batch_perturbed_S
 
@@ -352,6 +396,14 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray], batch_size: int = 100,
             d=2
         )
 
+        # Convert back to computational basis if input was comp basis
+        if not input_is_mps:
+            Psi_batch_comp = []
+            for b in range(batch_size):
+                Psi_sample = [Psi_batch[s][b] for s in range(len(Psi_batch))]
+                Psi_batch_comp.append(to_comp_basis(Psi_sample))
+            return np.stack(Psi_batch_comp), original_coefs, coefs_batch
+
         return Psi_batch, original_coefs, coefs_batch
 
     else:
@@ -404,20 +456,33 @@ def estimate_gradient_ols(dX, dy, lam=0.0):
     return g_hat
 
 def update_state(Psi, S_grad_est_proj, lr, site):
-    """Apply targeted, controlled perturbation to the state"""
+    """Apply targeted, controlled perturbation to the state.
 
-    Psi = to_canonical_form(Psi, form='B')
-    if isinstance(Psi[0], t.Tensor):
-        Psi = [p.numpy() for p in Psi]
-    L = len(Psi)
-    psi = Psi[0]
+    Supports both MPS (list of tensors) and computational basis (single array) inputs.
+    Output format matches input format.
+    """
+    # Detect input format
+    input_is_mps = is_mps_format(Psi)
+
+    if input_is_mps:
+        Psi_mps = to_canonical_form(Psi, form='B')
+        if isinstance(Psi_mps[0], t.Tensor):
+            Psi_mps = [p.numpy() for p in Psi_mps]
+    else:
+        # Convert computational basis to MPS
+        L = int(np.log2(Psi.size))
+        Psi_mps = from_comp_basis(Psi, L=L)
+        Psi_mps = to_canonical_form(Psi_mps, form='B')
+
+    L = len(Psi_mps)
+    psi = Psi_mps[0]
     d_phys = psi.shape[0]
     for j in range(L):
         psi_grouped = einops.rearrange(
             psi, 'd_phys chi_l chi_r -> (d_phys chi_l) chi_r'
         )
         U, S, Vh = np.linalg.svd(psi_grouped, full_matrices=False)
-        Psi[j] = einops.rearrange(U, '(d_phys chi_l) chi_r -> d_phys chi_l chi_r', d_phys=d_phys)
+        Psi_mps[j] = einops.rearrange(U, '(d_phys chi_l) chi_r -> d_phys chi_l chi_r', d_phys=d_phys)
 
 
         if j < L - 1:
@@ -426,11 +491,16 @@ def update_state(Psi, S_grad_est_proj, lr, site):
                 S = S / np.linalg.norm(S)
 
             psi = einops.einsum(
-                S, Vh, Psi[j+1],
+                S, Vh, Psi_mps[j+1],
                 'bond_r, bond_r chi_l, d_phys chi_l chi_r -> d_phys bond_r chi_r'
             )
 
-    return to_canonical_form(Psi, form='B')
+    Psi_out = to_canonical_form(Psi_mps, form='B')
+
+    # Convert back to original format if needed
+    if not input_is_mps:
+        return to_comp_basis(Psi_out)
+    return Psi_out
 
 
 def update_state_unitary(Psi, coef_grad_est, lr, site):
@@ -441,29 +511,41 @@ def update_state_unitary(Psi, coef_grad_est, lr, site):
     - Real state: Uses 4 generators (X⊗Y, Y⊗X, Y⊗Z, Z⊗Y), preserves real dtype
     - Complex state: Uses all 9 two-qubit Pauli generators
 
+    Supports both MPS (list of tensors) and computational basis (single array) inputs.
+    Output format matches input format.
+
     Args:
-        Psi: MPS state (list of tensors)
+        Psi: MPS state (list of tensors) or computational basis state (array of 2^L elements)
         coef_grad_est: Gradient estimate in Pauli coefficient space
                        Shape (4,) for real states, (9,) for complex states
         lr: Learning rate
         site: Site index where update is applied
 
     Returns:
-        Updated MPS state in canonical form 'B'
+        Updated state in same format as input, in canonical form 'B' if MPS
     """
-    Psi = to_canonical_form(Psi, form='B')
-    if isinstance(Psi[0], t.Tensor):
-        Psi = [p.numpy() for p in Psi]
+    # Detect input format
+    input_is_mps = is_mps_format(Psi)
 
-    L = len(Psi)
+    if input_is_mps:
+        Psi_mps = to_canonical_form(Psi, form='B')
+        if isinstance(Psi_mps[0], t.Tensor):
+            Psi_mps = [p.numpy() for p in Psi_mps]
+    else:
+        # Convert computational basis to MPS
+        L_qubits = int(np.log2(Psi.size))
+        Psi_mps = from_comp_basis(Psi, L=L_qubits)
+        Psi_mps = to_canonical_form(Psi_mps, form='B')
+
+    L = len(Psi_mps)
     site_next = (site + 1) % L  # Periodic boundary conditions
 
     # Auto-detect whether to use real or complex generators
-    use_real_generators = np.isrealobj(Psi[0]) and all(np.isrealobj(Psi[i]) for i in range(len(Psi)))
+    use_real_generators = np.isrealobj(Psi_mps[0]) and all(np.isrealobj(Psi_mps[i]) for i in range(L))
 
     if use_real_generators:
         num_generators = 4
-        generators = REAL_PAULI_GENERATORS.astype(Psi[0].dtype)
+        generators = REAL_PAULI_GENERATORS.astype(Psi_mps[0].dtype)
     else:
         num_generators = 9
         generators = PAULI_TENSORS_2Q
@@ -480,7 +562,7 @@ def update_state_unitary(Psi, coef_grad_est, lr, site):
         iH = np.einsum('k,kij->ij', coef_update, generators)
 
         # Cayley transform with real arithmetic
-        I4 = np.eye(4, dtype=Psi[0].dtype)
+        I4 = np.eye(4, dtype=Psi_mps[0].dtype)
         numerator = I4 + lr * iH / 2
         denominator = I4 - lr * iH / 2
         U = numerator @ np.linalg.inv(denominator)
@@ -496,7 +578,7 @@ def update_state_unitary(Psi, coef_grad_est, lr, site):
 
     # Group the two adjacent sites
     psi_grouped = einops.einsum(
-        Psi[site], Psi[site_next],
+        Psi_mps[site], Psi_mps[site_next],
         'd1 chi_l chi_m, d2 chi_m chi_r -> d1 d2 chi_l chi_r'
     )
     psi_grouped = einops.rearrange(psi_grouped, 'd1 d2 chi_l chi_r -> (d1 d2) chi_l chi_r')
@@ -514,24 +596,29 @@ def update_state_unitary(Psi, coef_grad_est, lr, site):
         'd1 d2 chi_l chi_r -> (d1 chi_l) (d2 chi_r)'
     )
 
-    Q, R = np.linalg.qr(psi_new_grouped_2d) 
+    Q, R = np.linalg.qr(psi_new_grouped_2d)
     # Now the dimensions are ((d1 chi_l) chi_m) and (chi_m (d2 chi_r))
 
     # Reshape Q back to MPS tensor at site
-    Psi[site] = einops.rearrange(
+    Psi_mps[site] = einops.rearrange(
         Q,
         '(d chi_l) chi_m -> d chi_l chi_m',
         d=2
     )
 
     # R goes to the next site
-    Psi[site_next] = einops.rearrange(
+    Psi_mps[site_next] = einops.rearrange(
         R,
         'chi_m (d chi_r) -> d chi_m chi_r',
         d=2
     )
 
-    return to_canonical_form(Psi, form='B')
+    Psi_out = to_canonical_form(Psi_mps, form='B')
+
+    # Convert back to original format if needed
+    if not input_is_mps:
+        return to_comp_basis(Psi_out)
+    return Psi_out
 
 
 def compute_D(psi: np.ndarray, i: int, j: int):
@@ -838,7 +925,7 @@ def save_results(save_dir, Psi, metric_logs, **params):
 
 
 def opt_fid_state(
-    Psi: list[np.ndarray], # Initial fiducial state
+    Psi: list[np.ndarray] | np.ndarray, # Initial fiducial state (MPS or computational basis)
     H: list[np.ndarray], # Hamiltonian
     max_num_steps: int = 100, # Number of updates on the fiducial state before the program terminates
     eps: float = 0.005, # Learning rate associated with the update of the fiducial state
@@ -850,11 +937,27 @@ def opt_fid_state(
     wandb_project: str = "nash-equilibrium", # W&B project name
     wandb_config: dict = None, # Additional wandb config
     wandb_log_interval: int = 1, # Log to wandb every N steps (1 = every step, 20 = every 20 steps)
-    save_results: bool = True, # Whether to save results to file
+    should_save_results: bool = True, # Whether to save results to file
     save_dir: str = "data", # Directory to save results
     seed: int = None, # Random seed used for initialization (for tracking/reproducibility)
 ):
-    assert all(isinstance(Psi[i], np.ndarray) for i in range(len(Psi))), "Psi must be a list of numpy arrays"
+    """
+    Optimize the fiducial state for Nash equilibrium in quantum games.
+
+    Supports both MPS (list of tensors) and computational basis (single array) inputs.
+    Output format matches input format.
+    """
+    # Detect input format
+    input_is_mps = is_mps_format(Psi)
+
+    if input_is_mps:
+        assert all(isinstance(Psi[i], np.ndarray) for i in range(len(Psi))), "Psi must be a list of numpy arrays"
+    else:
+        assert isinstance(Psi, np.ndarray), "Psi must be a numpy array"
+        # Convert computational basis to MPS for internal optimization
+        L = int(np.log2(Psi.size))
+        Psi = from_comp_basis(Psi, L=L)
+
     assert all(isinstance(H[i], np.ndarray) for i in range(len(H))), "H must be a list of numpy arrays"
 
     # Initialize wandb if requested
@@ -992,7 +1095,7 @@ def opt_fid_state(
         wandb.finish()
 
     # Save results to file
-    if save_results:
+    if should_save_results:
         filepath, run_uuid = save_results(
             save_dir=save_dir,
             Psi=Psi,
@@ -1007,6 +1110,10 @@ def opt_fid_state(
             perturbation_method=perturbation_method,
             seed=seed,
         )
+
+    # Convert back to original format if needed
+    if not input_is_mps:
+        Psi = to_comp_basis(Psi)
 
     return Psi, metric_logs
 

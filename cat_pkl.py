@@ -1,6 +1,17 @@
 """
-Concatenate all pickle files from qpd4.py runs into a single pickle file.
-Removes the original split files after successful concatenation.
+Concatenate all pickle files from equilibrium statistics runs into a single pickle file.
+Supports both gather_equilibrium_stats.py output and legacy qpd4.py output.
+Optionally removes the original split files after successful concatenation.
+
+Usage:
+    # Use defaults (data/qpd6_results directory)
+    python cat_pkl.py
+
+    # Specify custom directory and pattern
+    python cat_pkl.py --input-dir data/equilibrium_stats --pattern "eqdata_randstates_*.pkl"
+
+    # Keep original files
+    python cat_pkl.py --no-remove
 """
 
 import pandas as pd
@@ -8,6 +19,7 @@ import os
 import glob
 from datetime import datetime
 import secrets
+import argparse
 
 def concatenate_pickle_files(
     input_dir: str = "data/qpd4_results",
@@ -80,14 +92,40 @@ def concatenate_pickle_files(
     print(f"{'='*70}")
 
     # Summary statistics
+    print(f"\nSummary Statistics:")
+
     if 'nash_equilibrium' in combined_df.columns:
         n_converged = combined_df['nash_equilibrium'].sum()
-        print(f"\nSummary:")
         print(f"  Nash equilibrium converged: {n_converged}/{len(combined_df)} ({100*n_converged/len(combined_df):.1f}%)")
+
+    if 'nash_state' in combined_df.columns:
+        n_local = combined_df['nash_state'].sum()
+        print(f"  Local convergence: {n_local}/{len(combined_df)} ({100*n_local/len(combined_df):.1f}%)")
 
     if 'num_iters' in combined_df.columns:
         print(f"  Avg iterations: {combined_df['num_iters'].mean():.1f}")
         print(f"  Max iterations: {combined_df['num_iters'].max()}")
+
+    if 'expl' in combined_df.columns:
+        # Handle array column - compute mean exploitability across players and samples
+        import numpy as np
+        mean_expl = combined_df['expl'].apply(lambda x: np.mean(x) if hasattr(x, '__iter__') else x).mean()
+        max_expl = combined_df['expl'].apply(lambda x: np.max(x) if hasattr(x, '__iter__') else x).max()
+        print(f"  Avg exploitability: {mean_expl:.6f}")
+        print(f"  Max exploitability: {max_expl:.6f}")
+
+    if 'energy' in combined_df.columns:
+        # Energy is array per player, compute mean welfare (sum of energies)
+        import numpy as np
+        mean_welfare = combined_df['energy'].apply(lambda x: np.sum(x) if hasattr(x, '__iter__') else x).mean()
+        max_welfare = combined_df['energy'].apply(lambda x: np.sum(x) if hasattr(x, '__iter__') else x).max()
+        print(f"  Avg welfare (sum of energies): {mean_welfare:.3f}")
+        print(f"  Max welfare: {max_welfare:.3f}")
+
+    # Legacy support: check for welfare column from opt_fid_state results
+    if 'welfare' in combined_df.columns:
+        print(f"  Avg welfare: {combined_df['welfare'].mean():.3f}")
+        print(f"  Max welfare: {combined_df['welfare'].max():.3f}")
 
     # Remove original files if requested
     if remove_originals:
@@ -103,13 +141,31 @@ def concatenate_pickle_files(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description='Concatenate pickle files from equilibrium statistics runs',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument('--input-dir', type=str, default='data/qpd6_results',
+                        help='Directory containing pickle files to concatenate')
+    parser.add_argument('--pattern', type=str, default='eqdata_randstates_*.pkl',
+                        help='Glob pattern to match pickle files')
+    parser.add_argument('--output-filename', type=str, default=None,
+                        help='Output filename (auto-generated if not specified)')
+    parser.add_argument('--no-remove', action='store_true',
+                        help='Keep original files after concatenation')
+    parser.add_argument('--show-head', action='store_true',
+                        help='Display first few rows after concatenation')
+
+    args = parser.parse_args()
+
     # Run concatenation
     df = concatenate_pickle_files(
-        input_dir="data/qpd6_results",
-        pattern="eqdata_randstates_*.pkl",
-        remove_originals=True,  # Set to False to keep originals
+        input_dir=args.input_dir,
+        pattern=args.pattern,
+        output_filename=args.output_filename,
+        remove_originals=not args.no_remove,
     )
 
-    if df is not None:
+    if df is not None and args.show_head:
         print("\nFirst few rows:")
         print(df.head())

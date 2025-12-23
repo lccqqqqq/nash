@@ -105,7 +105,7 @@ def concatenate_pickle_files(
 if __name__ == "__main__":
     # Run concatenation
     df = concatenate_pickle_files(
-        input_dir="data/qpd4_results",
+        input_dir="data/qpd6_results",
         pattern="eqdata_randstates_*.pkl",
         remove_originals=True,  # Set to False to keep originals
     )

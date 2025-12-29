@@ -61,6 +61,18 @@ def test_canonical_form(Psi: List[np.ndarray], form: str = 'A', atol: float = 1e
             raise ValueError(f"Invalid form: {form}")
     return True
 
+def get_rand_state_as_mps(L: int = 3, max_bond_dim: int | None = None, seed: int | None = None,
+                          cutoff: float = 1e-16, canonicalize: bool = True, dtype: np.dtype = np.float32):
+    """
+    Generate random state as MPS with specified bond dimension.
+    """
+    if dtype == np.complex64 or dtype == np.complex128:
+        psi = np.random.randn(2**L, dtype=dtype) + 1j * np.random.randn(2**L, dtype=dtype)
+    else:
+        psi = np.random.randn(2**L, dtype=dtype)
+    psi = psi / np.linalg.norm(psi)
+    return from_comp_basis(psi, L=L, max_bond_dim=max_bond_dim, cutoff=cutoff)
+
 
 def get_rand_mps(L: int = 3, chi: int = 4, d_phys: int = 2, seed: int | None = None,
                  dtype: np.dtype = np.float32, form: str = 'A', canonicalize: bool = True):

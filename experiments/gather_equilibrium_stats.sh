@@ -34,7 +34,7 @@ echo "  Number of players: $NUM_PLAYERS"
 echo "  Bond dimensions: ${BOND_DIMS[@]}"
 echo "  Samples per core: $NUM_SAMPLES_PER_CORE"
 echo "  Alpha: $ALPHA"
-echo "  Timeout: ${5:-180} minutes"
+echo "  Timeout: ${5:-1800} minutes"
 echo "========================================================================"
 echo ""
 
@@ -49,7 +49,7 @@ for CHI in "${BOND_DIMS[@]}"; do
     echo "Submitting job for chi=$CHI..."
 
     # Capture addqueue output and extract job ID
-    JOB_OUTPUT=$(addqueue -q long -n $NUM_CORES -m 0.9 -c "chi$CHI" /usr/bin/python3 experiments/gather_equilibrium_stats.py \
+    JOB_OUTPUT=$(addqueue -q long -n $NUM_CORES -m 1 -c "chi$CHI 5hrs" /usr/bin/python3 src/gather_equilibrium_stats.py \
         --num-players $NUM_PLAYERS \
         --chi $CHI \
         --num-samples $NUM_SAMPLES_PER_CORE \
@@ -81,7 +81,7 @@ echo "Monitoring job progress..."
 echo "========================================================================"
 
 # Monitor jobs with timeout
-TIMEOUT_MINUTES=${5:-180}  # Default 3 hours, can override as 5th argument
+TIMEOUT_MINUTES=${5:-1800}  # Default 30 hours, can override as 5th argument
 CHECK_INTERVAL=60  # Check every 60 seconds
 ELAPSED=0
 

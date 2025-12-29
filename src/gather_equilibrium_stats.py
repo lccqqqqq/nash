@@ -25,7 +25,7 @@ Multiple runs can be concatenated using cat_pkl.py.
 import numpy as np
 from solver import find_nash_eq1
 from game import get_default_H
-from mps_utils import get_rand_mps
+from mps_utils import get_rand_mps, get_rand_state_as_mps
 import time
 import uuid
 import os
@@ -49,6 +49,7 @@ def gather_equilibrium_statistics(
     return_history: bool = False,
     save_dir: str = "data/equilibrium_stats",
     seed: int = None,
+    rand_measure: str = 'haar',
 ):
     """
     Gather equilibrium statistics from random initial states.
@@ -84,7 +85,12 @@ def gather_equilibrium_statistics(
 
     for i in iterator:
         # Generate random initial state
-        Psi = get_rand_mps(L=num_players, chi=chi, d_phys=2, dtype=dtype)
+        if rand_measure == 'haar':
+            Psi = get_rand_state_as_mps(L=num_players, max_bond_dim=chi, d_phys=2, dtype=dtype)
+        elif rand_measure == 'rand_mps':
+            Psi = get_rand_mps(L=num_players, chi=chi, d_phys=2, dtype=dtype)
+        else:
+            raise ValueError(f"Invalid random measure: {rand_measure}, must be 'haar' or 'rand_mps'")
 
         # Find Nash equilibrium
         result = find_nash_eq1(

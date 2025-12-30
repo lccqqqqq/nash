@@ -6,14 +6,14 @@
 # is handled by running multiple processes, not through MPI.
 #
 # Usage:
-#   bash experiments/gather_equilibrium_stats.sh [NUM_CORES] [NUM_PLAYERS] [NUM_SAMPLES_PER_CORE] [ALPHA] [TIMEOUT_MINUTES]
+#   bash experiments/gather_equilibrium_stats.sh [NUM_CORES] [NUM_PLAYERS] [NUM_SAMPLES_PER_CORE] [ALPHA] [TIMEOUT_MINUTES] [RAND_MEASURE]
 #
 # Examples:
-#   # Use defaults (10 cores, 3 players, 50 samples per core, alpha=0.06, 180 min timeout)
+#   # Use defaults (10 cores, 3 players, 50 samples per core, alpha=0.06, 180 min timeout, haar measure)
 #   bash experiments/gather_equilibrium_stats.sh
 #
 #   # Custom parameters
-#   bash experiments/gather_equilibrium_stats.sh 20 4 100 0.1 240
+#   bash experiments/gather_equilibrium_stats.sh 20 4 100 0.1 240 rand_mps
 #
 # For cluster execution, replace the for loop with your cluster's job array
 # or parallel submission commands (e.g., addqueue, sbatch, qsub).
@@ -23,6 +23,7 @@ NUM_CORES=${1:-10}
 NUM_PLAYERS=${2:-3}
 NUM_SAMPLES_PER_CORE=${3:-1}
 ALPHA=${4:-0.06}
+RAND_MEASURE=${6:-rand_mps}
 
 
 echo "========================================================================"
@@ -34,6 +35,7 @@ echo "  Number of players: $NUM_PLAYERS"
 echo "  Bond dimensions: ${BOND_DIMS[@]}"
 echo "  Samples per core: $NUM_SAMPLES_PER_CORE"
 echo "  Alpha: $ALPHA"
+echo "  Random measure: $RAND_MEASURE"
 echo "  Timeout: ${5:-1800} minutes"
 echo "========================================================================"
 echo ""
@@ -58,9 +60,11 @@ for CHI in "${BOND_DIMS[@]}"; do
         --max-iter 1000 \
         --alpha $ALPHA \
         --convergence-threshold 1e-6 \
-        --expl-threshold 1e-3 2>&1)
+        --expl-threshold 1e-3 \
+        --rand-measure $RAND_MEASURE \
+        --non-commutative-norm $NON_COMMUTATIVE_NORM 2>&1)
 
-    # Extract job ID from output like "multirun-2571502.out"
+    # Extract job ID from output like "python3-2571502.out"
     JOB_ID=$(echo "$JOB_OUTPUT" | grep -oP 'python3-\K\d+' | head -1)
 
     if [ -n "$JOB_ID" ]; then

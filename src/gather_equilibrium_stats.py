@@ -6,11 +6,14 @@ the results for statistical analysis. It uses the differential best response
 algorithm from solver.py to find equilibria for quantum games.
 
 Usage:
-    # Basic usage with defaults (3 players, 50 samples)
+    # Basic usage with defaults (3 players, 50 samples, Haar measure)
     python experiments/gather_equilibrium_stats.py
 
     # Customize parameters
     python experiments/gather_equilibrium_stats.py --num-players 4 --chi 64 --num-samples 100
+
+    # Use random MPS instead of Haar measure
+    python experiments/gather_equilibrium_stats.py --rand-measure rand_mps --num-samples 50
 
     # Set seed for reproducibility
     python experiments/gather_equilibrium_stats.py --seed 42 --verbose
@@ -24,7 +27,7 @@ Multiple runs can be concatenated using cat_pkl.py.
 
 import numpy as np
 from solver import find_nash_eq1
-from game import get_default_H
+from game import get_default_H, get_default_cyclic_players, H_QPD, get_perturbed_H_QPD
 from mps_utils import get_rand_mps, get_rand_state_as_mps
 import time
 import uuid
@@ -72,6 +75,7 @@ def gather_equilibrium_statistics(
         return_history: Whether to return full iteration history (increases file size)
         save_dir: Directory to save results
         seed: Random seed for reproducibility (optional)
+        rand_measure: Random state measure ('haar' for Haar random states, 'rand_mps' for random MPS)
 
     Returns:
         List of result dictionaries from find_nash_eq1()
@@ -86,9 +90,9 @@ def gather_equilibrium_statistics(
     for i in iterator:
         # Generate random initial state
         if rand_measure == 'haar':
-            Psi = get_rand_state_as_mps(L=num_players, max_bond_dim=chi, d_phys=2, dtype=dtype)
+            Psi = get_rand_state_as_mps(L=num_players, max_bond_dim=chi, dtype=dtype)
         elif rand_measure == 'rand_mps':
-            Psi = get_rand_mps(L=num_players, chi=chi, d_phys=2, dtype=dtype)
+            Psi = get_rand_mps(L=num_players, chi=chi, dtype=dtype)
         else:
             raise ValueError(f"Invalid random measure: {rand_measure}, must be 'haar' or 'rand_mps'")
 
@@ -141,6 +145,8 @@ def main():
     )
 
     # Game configuration
+    parser.add_argument('--non-commutative-norm', type=float, default=0.0,
+                        help='Non-commutative norm for the payoff')
     parser.add_argument('--num-players', type=int, default=3,
                         help='Number of players in the game')
     parser.add_argument('--chi', type=int, default=32,
@@ -153,6 +159,8 @@ def main():
                         help='Number of random initial states to sample')
     parser.add_argument('--seed', type=int, default=None,
                         help='Random seed for reproducibility (optional)')
+    parser.add_argument('--rand-measure', type=str, default='haar', choices=['haar', 'rand_mps'],
+                        help="Random state measure: 'haar' for Haar random states, 'rand_mps' for random MPS")
 
     # Nash solver configuration
     parser.add_argument('--max-iter', type=int, default=1000,
@@ -188,6 +196,7 @@ def main():
     print(f"  Bond dimension (chi): {args.chi}")
     print(f"  Data type: {args.dtype}")
     print(f"  Number of samples: {args.num_samples}")
+    print(f"  Random measure: {args.rand_measure}")
     print(f"  Random seed: {args.seed if args.seed is not None else 'None (random)'}")
     print(f"  Max iterations: {args.max_iter}")
     print(f"  Alpha (learning rate): {args.alpha}")
@@ -198,7 +207,12 @@ def main():
 
     # Get default Hamiltonian for the specified number of players
     try:
-        H = get_default_H(num_players=args.num_players, dtype=dtype)
+        Hs = get_perturbed_H_QPD(eps=args.non_commutative_norm, dtype=dtype)
+        H = get_default_cyclic_players(L=args.num_players, Hs=Hs, dtype=dtype)
+        if args.non_commutative_norm > 0:
+            print(f"CRITICAL: In this run, implement non-commutative payoff")
+            print(f"  Non-commutative norm: {args.non_commutative_norm}")
+            print(f"  Hamiltonian: {Hs}")
     except Exception as e:
         print(f"\nError: Could not load default Hamiltonian for {args.num_players} players.")
         print(f"Details: {e}")
@@ -222,6 +236,7 @@ def main():
         return_history=args.return_history,
         save_dir=args.save_dir,
         seed=args.seed,
+        rand_measure=args.rand_measure,
     )
     elapsed = time.time() - start_time
 

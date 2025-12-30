@@ -25,12 +25,13 @@ from src.mps_utils import (
     to_comp_basis,
     from_comp_basis,
     get_rand_mps,
+    get_rand_state_as_mps,
     get_product_state,
     get_ghz_state,
     apply_random_unitaries,
     test_canonical_form
 )
-from src.game import get_default_3players, get_default_2players, get_default_H
+from src.game import get_default_3players, get_default_2players, get_default_H, get_default_cyclic_players, H_QPD, get_perturbed_H_QPD
 from src.entanglement import compute_entanglement_params as compute_ent_params_from_state
 
 
@@ -936,7 +937,7 @@ def opt_fid_state(
     use_wandb: bool = False, # Whether to use wandb logging
     wandb_project: str = "nash-equilibrium", # W&B project name
     wandb_config: dict = None, # Additional wandb config
-    wandb_log_interval: int = 1, # Log to wandb every N steps (1 = every step, 20 = every 20 steps)
+    wandb_log_interval: int = 10, # Log to wandb every N steps (1 = every step, 20 = every 20 steps)
     should_save_results: bool = True, # Whether to save results to file
     save_dir: str = "data", # Directory to save results
     seed: int = None, # Random seed used for initialization (for tracking/reproducibility)
@@ -1123,6 +1124,7 @@ def parse_args():
     # ========== DEFAULT CONFIGURATION ==========
     DEFAULTS = {
         # State initialization
+        'non_commutative_norm': 0.0,
         'chi': 4,
         'num_players': 3,
         'seed': None,
@@ -1154,6 +1156,8 @@ def parse_args():
     )
 
     # State initialization parameters
+    parser.add_argument('--non-commutative-norm', type=float, default=DEFAULTS['non_commutative_norm'],
+                        help='Non-commutative norm for the payoff')
     parser.add_argument('--chi', type=int, default=DEFAULTS['chi'],
                         help='MPS bond dimension')
     parser.add_argument('--num-players', type=int, default=DEFAULTS['num_players'],
@@ -1198,7 +1202,7 @@ def parse_args():
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
 
     # Set random seed if provided
@@ -1214,8 +1218,13 @@ if __name__ == "__main__":
 
     # Initialize state and Hamiltonian
     print(f"Initializing random MPS with L={args.num_players}, chi={args.chi}")
-    Psi = get_rand_mps(L=args.num_players, chi=args.chi, d_phys=2, seed=args.seed, dtype=dtype)
-    H = get_default_H(num_players=args.num_players, dtype=dtype)
+    Psi = get_rand_state_as_mps(L=args.num_players, max_bond_dim=args.chi, seed=args.seed, dtype=dtype)
+
+    if args.non_commutative_norm > 0:
+        print(f"CRITICAL: In this run, implement non-commutative payoff")
+        print(f"  Non-commutative norm: {args.non_commutative_norm}")
+    Hs = get_perturbed_H_QPD(eps=args.non_commutative_norm, dtype=dtype)
+    H = get_default_cyclic_players(L=args.num_players, Hs=Hs, dtype=dtype)
 
     # Prepare wandb config
     wandb_config = {
@@ -1247,7 +1256,7 @@ if __name__ == "__main__":
         use_wandb=args.use_wandb,
         wandb_project=args.wandb_project,
         wandb_config=wandb_config,
-        save_results=args.save_results,
+        should_save_results=args.save_results,
         save_dir=args.save_dir
     )
 
@@ -1280,4 +1289,5 @@ if __name__ == "__main__":
     print("\nLast 5 iterations:")
     print(df.tail())
 
-
+if __name__ == "__main__":
+    main()

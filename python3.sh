@@ -1,6 +1,6 @@
 #!/bin/bash -l
 echo =========================================================   
-echo Job submitted  date = Mon 29 Dec 23:26:24 GMT 2025      
+echo Job submitted  date = Tue 30 Dec 22:51:41 GMT 2025      
 date_start=`date +%s`
 echo $SLURM_JOB_NUM_NODES nodes \( $SLURM_CPUS_ON_NODE processes per node \)        
 echo $SLURM_JOB_NUM_NODES hosts used: $SLURM_JOB_NODELIST      
@@ -15,7 +15,7 @@ echo
 ulimit -l unlimited
 
 export OMP_NUM_THEADS=1
- /usr/local/shared/slurm/bin/srun -u -n 100 --mpi=pmix --mem-per-cpu=1024 nice -n 10 /usr/bin/python3 src/gather_equilibrium_stats.py --num-players 6 --chi 8 --num-samples 800 --save-dir data/equilibrium_stats/chi8 --verbose --max-iter 1000 --alpha 0.06 --convergence-threshold 1e-6 --expl-threshold 1e-3
+ /usr/local/shared/slurm/bin/srun -u -n 4 --mpi=pmix --mem-per-cpu=1024 nice -n 10 /usr/bin/python3 src/gather_equilibrium_stats.py --num-players 3 --chi 16 --num-samples 10 --save-dir data/equilibrium_stats/haar_b51c7594 --verbose --max-iter 1000 --alpha 0.06 --convergence-threshold 1e-6 --expl-threshold 1e-3 --rand-measure haar --non-commutative-norm 2
   echo ---------------                                           
   echo Job output ends                                           
 

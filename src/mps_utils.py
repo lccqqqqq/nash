@@ -67,9 +67,9 @@ def get_rand_state_as_mps(L: int = 3, max_bond_dim: int | None = None, seed: int
     Generate random state as MPS with specified bond dimension.
     """
     if dtype == np.complex64 or dtype == np.complex128:
-        psi = np.random.randn(2**L, dtype=dtype) + 1j * np.random.randn(2**L, dtype=dtype)
+        psi = np.random.randn(2**L) + 1j * np.random.randn(2**L)
     else:
-        psi = np.random.randn(2**L, dtype=dtype)
+        psi = np.random.randn(2**L)
     psi = psi / np.linalg.norm(psi)
     return from_comp_basis(psi, L=L, max_bond_dim=max_bond_dim, cutoff=cutoff)
 

@@ -6,6 +6,16 @@ import numpy as np
 import einops
 import networkx as nx
 from jaxtyping import Complex
+from utils.misc import get_rand_normalized_herm_matrix
+
+H_QPD = np.stack([
+    np.diag(np.array([3., 0., 5., 1.])),   # Player 1's payoff in 2-player interaction
+    np.diag(np.array([3., 5., 0., 1.]))    # Player 2's payoff in 2-player interaction
+])
+
+
+def get_perturbed_H_QPD(eps: float = 0.2, dtype: np.dtype = np.float32):
+    return [h + eps * get_rand_normalized_herm_matrix(d=h.shape[-1], dtype=dtype) for h in H_QPD]
 
 def canonical_qpd(L: int = 3):
     """
@@ -92,7 +102,7 @@ def get_default_2players(option: str = 'H', dtype: np.dtype = np.float32):
     else:
         raise ValueError("Invalid option")
 
-def get_default_cyclic_players(L: int, option: str = 'H', dtype: np.dtype = np.float32):
+def get_default_cyclic_players(L: int, Hs: list[np.ndarray] = H_QPD, option: str = 'H', dtype: np.dtype = np.float32):
     """
     Returns the default Hamiltonian for L-player quantum game on a cyclic/ring graph.
 
@@ -118,10 +128,7 @@ def get_default_cyclic_players(L: int, option: str = 'H', dtype: np.dtype = np.f
         raise ValueError(f"Number of players must be >= 2, got {L}")
 
     # Pairwise payoff from more_players.ipynb (same as 2-player game)
-    H_pairwise = np.stack([
-        np.diag(np.array([3., 0., 5., 1.], dtype=dtype)),   # Player 1's payoff in 2-player interaction
-        np.diag(np.array([3., 5., 0., 1.], dtype=dtype))    # Player 2's payoff in 2-player interaction
-    ])
+    
 
     # Ring graph topology: 0-1-2-...-L-1-0
     H = []
@@ -139,7 +146,7 @@ def get_default_cyclic_players(L: int, option: str = 'H', dtype: np.dtype = np.f
 
             # Get pairwise Hamiltonian and embed into full L-qubit space
             H_edge = np.eye(2**L, dtype=dtype).reshape([2] * (2 * L))
-            H_2site = H_pairwise[idx_in_edge].reshape(2, 2, 2, 2)
+            H_2site = Hs[idx_in_edge].reshape(2, 2, 2, 2)
 
             # Contract: place 2-site interaction at positions (edge[0], edge[1])
             # H_edge has indices [phys_0, phys_1, ..., phys_{L-1}, aux_0, aux_1, ..., aux_{L-1}]

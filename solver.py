@@ -84,12 +84,38 @@ def kick_with_u(Psi):
         Psi[i] = apply_unitary(U.T.conj(), Psi[i])
     return Psi
 
-def compute_exploitability(psi, H, player_idx):
+def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42):
+    """
+    Compute exploitability of a quantum state for a given player using differential evolution
+    to search over all single-qubit unitaries in SU(2).
+
+    Args:
+        psi: Quantum state as ndarray with shape (2,2,...,2) for L qubits
+        H: List of Hamiltonian tensors for each player
+        player_idx: Index of the player to compute exploitability for
+        maxiter: Maximum iterations for differential evolution (default: 300)
+        seed: Random seed for differential evolution (default: 42)
+
+    Returns:
+        exploitability: Maximum payoff gain from single-qubit unitary deviation
+    """
     L = psi.ndim
 
     def uni_dev_payoff(alpha_vec):
         alpha = alpha_vec[0]
-        unitary = np.eye(2) * math.cos(alpha) + np.array([[0, 1], [-1, 0]]) * math.sin(alpha)
+        theta = alpha_vec[1]
+        phi = alpha_vec[2]
+
+        nx = math.sin(theta) * math.cos(phi)
+        ny = math.sin(theta) * math.sin(phi)
+        nz = math.cos(theta)
+
+        # Correct SU(2) parametrization: U = cos(α)I + i·sin(α)(n·σ)
+        # This is equivalent to exp(i·α·n·σ)
+        unitary = np.eye(2, dtype=np.complex128) * math.cos(alpha) + 1j * math.sin(alpha) * (
+            nx * PAULIS[0] + ny * PAULIS[1] + nz * PAULIS[2]
+        )
+
         psi_dev = apply_u(unitary, psi, [player_idx])
         dE = np.tensordot(H[player_idx], psi_dev, axes=([L+j for j in range(L)], [j for j in range(L)]))
         dE = np.tensordot(psi_dev.conj(), dE, axes=([j for j in range(L) if j != player_idx], [j for j in range(L) if j != player_idx]))
@@ -97,13 +123,13 @@ def compute_exploitability(psi, H, player_idx):
 
     result = differential_evolution(
         uni_dev_payoff,
-        bounds=[(0, math.pi)],
-        maxiter=100,
-        seed=42,
+        bounds=[(0, math.pi), (0, math.pi), (0, 2*math.pi)],
+        maxiter=maxiter,
+        seed=seed,
         atol=1e-6,
         tol=1e-6,
     )
-    return -result.fun + uni_dev_payoff(np.array([0]))
+    return -result.fun + uni_dev_payoff(np.array([0, 0, 0]))
 
 def find_nash_eq1(
     Psi: list[np.ndarray] | np.ndarray, # allowing for both MPS and computational basis input

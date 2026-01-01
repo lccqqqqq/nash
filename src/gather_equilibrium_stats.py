@@ -53,6 +53,8 @@ def gather_equilibrium_statistics(
     save_dir: str = "data/equilibrium_stats",
     seed: int = None,
     rand_measure: str = 'haar',
+    expl_maxiter: int = 300,
+    expl_seed: int = 42,
 ):
     """
     Gather equilibrium statistics from random initial states.
@@ -76,6 +78,8 @@ def gather_equilibrium_statistics(
         save_dir: Directory to save results
         seed: Random seed for reproducibility (optional)
         rand_measure: Random state measure ('haar' for Haar random states, 'rand_mps' for random MPS)
+        expl_maxiter: Max iterations for differential evolution in exploitability computation (default: 300)
+        expl_seed: Random seed for exploitability computation (default: 42)
 
     Returns:
         List of result dictionaries from find_nash_eq1()
@@ -106,7 +110,9 @@ def gather_equilibrium_statistics(
             expl_threshold=expl_threshold,
             use_tqdm=False,  # Disable inner progress bar to avoid clutter
             expl_check_interval=expl_check_interval,
-            return_history=return_history
+            return_history=return_history,
+            expl_maxiter=expl_maxiter,
+            expl_seed=expl_seed,
         )
         results.append(result)
 
@@ -151,7 +157,7 @@ def main():
                         help='Number of players in the game')
     parser.add_argument('--chi', type=int, default=32,
                         help='MPS bond dimension (controls entanglement capacity)')
-    parser.add_argument('--dtype', type=str, default='float32', choices=['float32', 'float64'],
+    parser.add_argument('--dtype', type=str, default='float32', choices=['float32', 'complex64'],
                         help='Data type for state initialization')
 
     # Sampling configuration
@@ -173,6 +179,10 @@ def main():
                         help='Global convergence threshold (exploitability)')
     parser.add_argument('--expl-check-interval', type=int, default=10,
                         help='How often to check exploitability during optimization')
+    parser.add_argument('--expl-maxiter', type=int, default=300,
+                        help='Max iterations for differential evolution in exploitability computation')
+    parser.add_argument('--expl-seed', type=int, default=42,
+                        help='Random seed for exploitability computation (for reproducibility)')
     parser.add_argument('--return-history', action='store_true',
                         help='Store full iteration history (increases file size)')
 
@@ -185,7 +195,7 @@ def main():
     args = parser.parse_args()
 
     # Convert dtype string to numpy dtype
-    dtype = np.float32 if args.dtype == 'float32' else np.float64
+    dtype = np.float32 if args.dtype == 'float32' else np.complex64
 
     # Print configuration
     print("="*70)
@@ -202,6 +212,8 @@ def main():
     print(f"  Alpha (learning rate): {args.alpha}")
     print(f"  Convergence threshold: {args.convergence_threshold}")
     print(f"  Exploitability threshold: {args.expl_threshold}")
+    print(f"  Exploitability max iterations: {args.expl_maxiter}")
+    print(f"  Exploitability seed: {args.expl_seed}")
     print(f"  Save directory: {args.save_dir}")
     print("="*70)
 
@@ -237,6 +249,8 @@ def main():
         save_dir=args.save_dir,
         seed=args.seed,
         rand_measure=args.rand_measure,
+        expl_maxiter=args.expl_maxiter,
+        expl_seed=args.expl_seed,
     )
     elapsed = time.time() - start_time
 

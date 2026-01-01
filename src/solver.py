@@ -19,7 +19,7 @@ import pickle
 import uuid
 
 # Import from refactored src/ modules
-from src.mps_utils import (
+from mps_utils import (
     apply_unitary,
     to_canonical_form,
     to_comp_basis,
@@ -31,8 +31,8 @@ from src.mps_utils import (
     apply_random_unitaries,
     test_canonical_form
 )
-from src.game import get_default_3players, get_default_2players, get_default_H, get_default_cyclic_players, H_QPD, get_perturbed_H_QPD
-from src.entanglement import compute_entanglement_params as compute_ent_params_from_state
+from game import get_default_3players, get_default_2players, get_default_H, get_default_cyclic_players, H_QPD, get_perturbed_H_QPD
+from entanglement import compute_entanglement_params as compute_ent_params_from_state
 
 
 # Pre-computed Pauli matrices and tensor products for unitary perturbations
@@ -141,6 +141,8 @@ def find_nash_eq1(
     use_tqdm: bool = False,
     expl_check_interval: int = 10,
     return_history: bool = False,
+    expl_maxiter: int = 300,
+    expl_seed: int = 42,
 ):
     # Convert types to ndarray
     if isinstance(Psi, list) and isinstance(Psi[0], t.Tensor):
@@ -193,7 +195,7 @@ def find_nash_eq1(
 
 
         if n % expl_check_interval == 0:
-            expl = [compute_exploitability(psi, H, i) for i in range(L)]
+            expl = [compute_exploitability(psi, H, i, maxiter=expl_maxiter, seed=expl_seed) for i in range(L)]
             expl_list.append(expl)
             if sum(expl) < expl_threshold:
                 global_converged = True

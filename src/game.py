@@ -6,7 +6,6 @@ import numpy as np
 import einops
 import networkx as nx
 from jaxtyping import Complex
-from utils.misc import get_rand_normalized_herm_matrix
 
 H_QPD = np.stack([
     np.diag(np.array([3., 0., 5., 1.])),   # Player 1's payoff in 2-player interaction
@@ -14,8 +13,41 @@ H_QPD = np.stack([
 ])
 
 
+def _get_rand_normalized_herm_matrix(d: int, dtype: np.dtype = np.float32):
+    """Generate a random normalized Hermitian matrix.
+
+    Args:
+        d: Matrix dimension
+        dtype: Data type (np.float32 for real symmetric, np.complex64/128 for Hermitian)
+
+    Returns:
+        Normalized Hermitian matrix with norm 1
+    """
+    if dtype in (np.float32, np.float64):
+        # Real case: generate symmetric matrix
+        rand_herm_matrix = np.random.randn(d, d).astype(dtype)
+        rand_herm_matrix = rand_herm_matrix + rand_herm_matrix.T
+        rand_herm_matrix = rand_herm_matrix / np.linalg.norm(rand_herm_matrix)
+    else:
+        # Complex case: generate Hermitian matrix
+        rand_herm_matrix = (np.random.randn(d, d) + 1j * np.random.randn(d, d)).astype(dtype)
+        rand_herm_matrix = rand_herm_matrix + rand_herm_matrix.T.conj()
+        rand_herm_matrix = rand_herm_matrix / np.linalg.norm(rand_herm_matrix)
+
+    return rand_herm_matrix
+
+
 def get_perturbed_H_QPD(eps: float = 0.2, dtype: np.dtype = np.float32):
-    return [h + eps * get_rand_normalized_herm_matrix(d=h.shape[-1], dtype=dtype) for h in H_QPD]
+    """Get perturbed quantum Prisoner's Dilemma Hamiltonian.
+
+    Args:
+        eps: Perturbation strength (non-commutative norm)
+        dtype: Data type for the matrices
+
+    Returns:
+        List of perturbed Hamiltonian matrices for each player
+    """
+    return [h + eps * _get_rand_normalized_herm_matrix(d=h.shape[-1], dtype=dtype) for h in H_QPD]
 
 def canonical_qpd(L: int = 3):
     """

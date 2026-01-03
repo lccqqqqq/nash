@@ -22,8 +22,20 @@ parameters:
   subroutine_lr:
     value: 0.06
 
+  max_subroutine_lr:
+    value: 1.0
+
   subroutine_max_iter:
     value: 1000
+
+  expl_check_interval:
+    value: 50
+
+  expl_maxiter:
+    value: 100
+
+  real_strategies:
+    value: true
 
   # Fixed parameters
   max_num_steps:

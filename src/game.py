@@ -37,7 +37,7 @@ def _get_rand_normalized_herm_matrix(d: int, dtype: np.dtype = np.float32):
     return rand_herm_matrix
 
 
-def get_perturbed_H_QPD(eps: float = 0.2, dtype: np.dtype = np.float32):
+def get_perturbed_H_QPD(eps: float = 0.2, dtype: np.dtype = np.float32, seed: int = None):
     """Get perturbed quantum Prisoner's Dilemma Hamiltonian.
 
     Args:
@@ -47,6 +47,8 @@ def get_perturbed_H_QPD(eps: float = 0.2, dtype: np.dtype = np.float32):
     Returns:
         List of perturbed Hamiltonian matrices for each player
     """
+    if seed is not None:
+        np.random.seed(seed)
     return [h + eps * _get_rand_normalized_herm_matrix(d=h.shape[-1], dtype=dtype) for h in H_QPD]
 
 def canonical_qpd(L: int = 3):

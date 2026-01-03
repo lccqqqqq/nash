@@ -1,6 +1,6 @@
 #!/bin/bash -l
 echo =========================================================   
-echo Job submitted  date = Tue 30 Dec 22:51:41 GMT 2025      
+echo Job submitted  date = Sat  3 Jan 22:25:26 GMT 2026      
 date_start=`date +%s`
 echo $SLURM_JOB_NUM_NODES nodes \( $SLURM_CPUS_ON_NODE processes per node \)        
 echo $SLURM_JOB_NUM_NODES hosts used: $SLURM_JOB_NODELIST      
@@ -15,7 +15,7 @@ echo
 ulimit -l unlimited
 
 export OMP_NUM_THEADS=1
- /usr/local/shared/slurm/bin/srun -u -n 4 --mpi=pmix --mem-per-cpu=1024 nice -n 10 /usr/bin/python3 src/gather_equilibrium_stats.py --num-players 3 --chi 16 --num-samples 10 --save-dir data/equilibrium_stats/haar_b51c7594 --verbose --max-iter 1000 --alpha 0.06 --convergence-threshold 1e-6 --expl-threshold 1e-3 --rand-measure haar --non-commutative-norm 2
+ /usr/local/shared/slurm/bin/srun -u -n 1 --mpi=pmix --mem-per-cpu=1024 nice -n 10 /usr/bin/python3 src/solver.py --non-commutative-norm 0 --seed 42 --chi 8 --num-players 6 --dtype complex --max-num-steps 1000 --eps 0.05 --num-perturbations 20 --perturbation-method unitary --subroutine-max-iter 1000 --subroutine-lr 0.01 --max-subroutine-lr 0.8 --expl-check-interval 60 --expl-maxiter 50 --wandb-project quantum-nash-1 --save-dir data/tests --wandb-experiment opt-fid-state-trail --no-real-strategies
   echo ---------------                                           
   echo Job output ends                                           
 

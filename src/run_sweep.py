@@ -47,7 +47,11 @@ SWEEP_CONFIG = {
             'min': 0.01,
             'max': 0.6
         },
+        'max_subroutine_lr': {'value': 1.0},  # Maximum LR for Nash solver retries
         'subroutine_max_iter': {'value': 1000},
+        'expl_check_interval': {'value': 50},  # Check exploitability every N iterations
+        'expl_maxiter': {'value': 100},  # Max iterations for differential evolution
+        'real_strategies': {'value': True},  # Use real strategies for exploitability
 
         # Fixed parameters
         'max_num_steps': {'value': 1000},
@@ -81,7 +85,11 @@ SWEEP_CONFIG_GRID = {
 
         # Nash equilibrium subroutine - manually discretized
         'subroutine_lr': {'values': [0.01, 0.03, 0.06, 0.1, 0.3]},  # 5 values (log-spaced)
+        'max_subroutine_lr': {'value': 1.0},  # Maximum LR for Nash solver retries
         'subroutine_max_iter': {'value': 1000},
+        'expl_check_interval': {'value': 50},  # Check exploitability every N iterations
+        'expl_maxiter': {'value': 100},  # Max iterations for differential evolution
+        'real_strategies': {'value': True},  # Use real strategies for exploitability
 
         # Fixed parameters
         'max_num_steps': {'value': 1000},
@@ -117,7 +125,8 @@ def train_sweep():
         # Initialize state and Hamiltonian
         num_players = config.get('num_players', 3)
         chi = config.get('chi', 4)
-        Psi = get_rand_mps(L=num_players, chi=chi, d_phys=2, seed=seed)
+        # Note: Uses global random state set above (no need to pass seed again)
+        Psi = get_rand_mps(L=num_players, chi=chi, d_phys=2)
         H = get_default_H(num_players=num_players)
 
         # Run optimization
@@ -129,6 +138,10 @@ def train_sweep():
             perturbation_method=config.get('perturbation_method', 'unitary'),
             subroutine_max_iter=config.get('subroutine_max_iter', 1000),
             subroutine_lr=config.get('subroutine_lr', 0.03),
+            max_subroutine_lr=config.get('max_subroutine_lr', 1.0),
+            expl_check_interval=config.get('expl_check_interval', 50),
+            expl_maxiter=config.get('expl_maxiter', 100),
+            real_strategies=config.get('real_strategies', True),
             use_wandb=True,  # Always true for sweeps
             wandb_project=config.get('wandb_project', 'nash-equilibrium'),
             wandb_config={'sweep_run': True, 'seed': seed},

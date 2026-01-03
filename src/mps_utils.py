@@ -65,7 +65,21 @@ def get_rand_state_as_mps(L: int = 3, max_bond_dim: int | None = None, seed: int
                           cutoff: float = 1e-16, canonicalize: bool = True, dtype: np.dtype = np.float32):
     """
     Generate random state as MPS with specified bond dimension.
+
+    Args:
+        L: Number of sites
+        max_bond_dim: Maximum bond dimension (chi)
+        seed: Random seed for reproducibility (optional)
+        cutoff: SVD truncation threshold
+        canonicalize: Whether to canonicalize (currently unused)
+        dtype: Data type for the state
+
+    Returns:
+        List[np.ndarray]: MPS representation of random Haar state
     """
+    if seed is not None:
+        np.random.seed(seed)
+
     if dtype == np.complex64 or dtype == np.complex128:
         psi = np.random.randn(2**L) + 1j * np.random.randn(2**L)
     else:

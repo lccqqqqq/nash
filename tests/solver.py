@@ -642,7 +642,7 @@ def update_state(Psi, S_grad_est_proj, lr, site):
     return Psi_out
 
 
-def update_state_unitary(Psi, coef_grad_est, lr, site, max_grad_norm=1.0):
+def update_state_unitary(Psi, coef_grad_est, lr, site):
     """
     Apply targeted unitary update to the state using Pauli coefficient gradients.
 
@@ -659,7 +659,6 @@ def update_state_unitary(Psi, coef_grad_est, lr, site, max_grad_norm=1.0):
                        Shape (4,) for real states, (9,) for complex states
         lr: Learning rate
         site: Site index where update is applied
-        max_grad_norm: Maximum allowed gradient norm for clipping (default: 1.0)
 
     Returns:
         Updated state in same format as input, in canonical form 'B' if MPS
@@ -694,17 +693,8 @@ def update_state_unitary(Psi, coef_grad_est, lr, site, max_grad_norm=1.0):
     assert coef_grad_est.shape[0] == num_generators, \
         f"Gradient shape {coef_grad_est.shape} doesn't match expected num_generators={num_generators}"
 
-    # Clip gradient norm to avoid aggressive updates
-    grad_norm = np.linalg.norm(coef_grad_est)
-
-    if grad_norm > max_grad_norm:
-        # Clip gradient while preserving direction
-        coef_update = coef_grad_est * (max_grad_norm / grad_norm)
-        if grad_norm > max_grad_norm * 2:  # Only print if significantly clipped
-            print(f"  Clipping gradient: {grad_norm:.4f} → {max_grad_norm:.4f}")
-    else:
-        # Use gradient as-is
-        coef_update = coef_grad_est
+    # Normalize the gradient to get update direction
+    coef_update = coef_grad_est / (np.linalg.norm(coef_grad_est) + 1e-10)
 
     if use_real_generators:
         # Real case: generators are already iH
@@ -1079,9 +1069,7 @@ def opt_fid_state(
     Psi: list[np.ndarray] | np.ndarray, # Initial fiducial state (MPS or computational basis)
     H: list[np.ndarray], # Hamiltonian
     max_num_steps: int = 100, # Number of updates on the fiducial state before the program terminates
-    eps: float = 0.005, # Learning rate for perturbations (gradient estimation)
-    update_lr: float = None, # Learning rate for state updates (defaults to eps if None)
-    max_grad_norm: float = 1.0, # Maximum gradient norm for clipping
+    eps: float = 0.005, # Learning rate associated with the update of the fiducial state
     num_perturbations: int = 10, # Number of perturbations to perform at each step to estimate the gradient
     subroutine_max_iter: int = 1000, # Max iter as in the equilibrium-finding subroutine
     subroutine_lr: float = 0.03, # Learning rate as in the equilibrium-finding subroutine
@@ -1090,7 +1078,6 @@ def opt_fid_state(
     expl_maxiter: int = 300, # Max iterations for exploitability computation (differential evolution)
     real_strategies: bool = True, # Whether to use real strategies (exp(iY) only) for exploitability
     perturbation_method: str = 'schmidt', # Perturbation method: 'schmidt' or 'unitary'
-    track_fidelity: bool = False, # Whether to track state fidelity (expensive for large systems)
     use_wandb: bool = False, # Whether to use wandb logging
     wandb_project: str = "nash-equilibrium", # W&B project name
     wandb_config: dict = None, # Additional wandb config
@@ -1118,10 +1105,6 @@ def opt_fid_state(
 
     assert all(isinstance(H[i], np.ndarray) for i in range(len(H))), "H must be a list of numpy arrays"
 
-    # Set default update learning rate
-    if update_lr is None:
-        update_lr = eps
-
     # Initialize wandb if requested
     wandb_initialized_here = False
     if use_wandb:
@@ -1130,8 +1113,6 @@ def opt_fid_state(
             config = {
                 'max_num_steps': max_num_steps,
                 'eps': eps,
-                'update_lr': update_lr,
-                'max_grad_norm': max_grad_norm,
                 'num_perturbations': num_perturbations,
                 'subroutine_max_iter': subroutine_max_iter,
                 'subroutine_lr': subroutine_lr,
@@ -1181,12 +1162,7 @@ def opt_fid_state(
     Psi = to_canonical_form(baseline_result['state_'], form='B')
 
     metric_logs = []
-    num_consecutive_failures = 0  # Track consecutive failed attempts
-
-    # Initialize progress bar with custom format
-    pbar = tqdm(range(max_num_steps), desc="Optimizing fiducial state")
-
-    for i in pbar:
+    for i in tqdm(range(max_num_steps), desc="Optimizing fiducial state"):
         # perturb at specific site
         site = i % (len(Psi) - 1)
         Psi_batch, original_param, batch_perturbed_param = batch_perturb(
@@ -1289,32 +1265,16 @@ def opt_fid_state(
 
         grad_est = estimate_gradient_ols(valid_param_diffs, energy_diffs)  # Shape: (param_dim,)
 
-        # Scale gradient by 1/eps to get true gradient
-        # (energy_diffs come from perturbations of size eps, so gradient = ΔE/eps)
-        grad_est = grad_est / eps
-        grad_norm = np.linalg.norm(grad_est)
-
-        # Optionally store state before update (for fidelity calculation)
-        if track_fidelity:
-            psi_before = to_comp_basis(Psi)
-
         # Update the state using appropriate method
         if perturbation_method == 'schmidt':
             # Project gradient onto tangent space (orthogonal to current singular values)
             grad_est_proj = grad_est - np.dot(grad_est, original_param[0]) * original_param[0] / np.linalg.norm(original_param[0])**2
-            Psi = update_state(Psi, grad_est_proj, lr=update_lr, site=site)
+            Psi = update_state(Psi, grad_est_proj, lr=eps, site=site)
         elif perturbation_method == 'unitary':
             # For unitary method, grad_est is in coefficient space - no projection needed
-            Psi = update_state_unitary(Psi, grad_est, lr=update_lr, site=site, max_grad_norm=max_grad_norm)
+            Psi = update_state_unitary(Psi, grad_est, lr=eps, site=site)
         else:
             raise ValueError(f"Unknown perturbation method: {perturbation_method}")
-
-        # Optionally compute fidelity after update (expensive for large systems)
-        if track_fidelity:
-            psi_after = to_comp_basis(Psi)
-            fidelity = np.abs(np.vdot(psi_before, psi_after))**2
-        else:
-            fidelity = None
 
         baseline_result, baseline_success, final_alpha = find_nash_eq1_with_retry(
             Psi, H,
@@ -1352,34 +1312,15 @@ def opt_fid_state(
             'welfare': np.sum(baseline_result['energy']).item(),
             'state': Psi,
             'ent_params': ent_params,
-            'fidelity': fidelity,
-            'grad_norm': grad_norm,
-            'site': site,
         }
         metric_logs.append(metrics)
-
-        # Update progress bar with current metrics
-        welfare_val = np.real(metrics['welfare'])
-        postfix_dict = {
-            'welfare': f'{welfare_val:.3f}',
-            'grad_norm': f'{grad_norm:.2f}',
-            'site': site
-        }
-        if track_fidelity:
-            postfix_dict['fidelity'] = f'{fidelity:.4f}'
-        pbar.set_postfix(postfix_dict)
 
         # Log to wandb (at specified interval or on last step)
         should_log = (i % wandb_log_interval == 0) or (i == max_num_steps - 1)
         if use_wandb and should_log:
             wandb_metrics = {
                 'welfare': np.real(metrics['welfare']),
-                'current_working_lr': current_working_lr,  # Track adaptive learning rate
-                'grad_norm': grad_norm,  # Gradient norm before clipping
-                'site': site,  # Which site was updated
             }
-            if track_fidelity:
-                wandb_metrics['fidelity'] = fidelity  # State update fidelity
 
             # Add entanglement parameters with appropriate labels (only for 3 or 4 qubits)
             if ent_params is not None:
@@ -1403,9 +1344,6 @@ def opt_fid_state(
 
             wandb.log(wandb_metrics, step=i)
 
-    # Close progress bar
-    pbar.close()
-
     # Finish wandb run (only if we initialized it here, not in a sweep)
     if use_wandb and wandb_initialized_here:
         wandb.finish()
@@ -1421,8 +1359,6 @@ def opt_fid_state(
             num_players=len(Psi),
             max_num_steps=max_num_steps,
             eps=eps,
-            update_lr=update_lr,
-            max_grad_norm=max_grad_norm,
             num_perturbations=num_perturbations,
             subroutine_max_iter=subroutine_max_iter,
             subroutine_lr=subroutine_lr,
@@ -1455,11 +1391,8 @@ def parse_args():
         # Optimization parameters
         'max_num_steps': 1000,
         'eps': 0.01,
-        'update_lr': None,  # Defaults to eps if not specified
-        'max_grad_norm': 1.0,
         'num_perturbations': 20,
         'perturbation_method': 'unitary',
-        'track_fidelity': False,
 
         # Nash equilibrium subroutine
         'subroutine_max_iter': 1000,
@@ -1498,11 +1431,7 @@ def parse_args():
     parser.add_argument('--max-num-steps', type=int, default=DEFAULTS['max_num_steps'],
                         help='Number of optimization steps')
     parser.add_argument('--eps', '--lr', type=float, default=DEFAULTS['eps'],
-                        help='Learning rate for perturbations (gradient estimation)')
-    parser.add_argument('--update-lr', type=float, default=DEFAULTS['update_lr'],
-                        help='Learning rate for state updates (defaults to --eps if not specified)')
-    parser.add_argument('--max-grad-norm', type=float, default=DEFAULTS['max_grad_norm'],
-                        help='Maximum gradient norm for clipping (prevents aggressive updates)')
+                        help='Learning rate for fiducial state updates')
     parser.add_argument('--num-perturbations', type=int, default=DEFAULTS['num_perturbations'],
                         help='Number of perturbations per step for gradient estimation')
     parser.add_argument('--perturbation-method', type=str, default=DEFAULTS['perturbation_method'],
@@ -1583,9 +1512,7 @@ def main():
 
     print(f"Starting optimization:")
     print(f"  Steps: {args.max_num_steps}")
-    print(f"  Perturbation LR (eps): {args.eps}")
-    print(f"  Update LR: {args.update_lr if args.update_lr is not None else f'{args.eps} (same as eps)'}")
-    print(f"  Max gradient norm: {args.max_grad_norm}")
+    print(f"  Learning rate: {args.eps}")
     print(f"  Perturbations: {args.num_perturbations}")
     print(f"  Perturbation method: {args.perturbation_method}")
     print(f"  Subroutine max iter: {args.subroutine_max_iter}")
@@ -1602,8 +1529,6 @@ def main():
         Psi, H,
         max_num_steps=args.max_num_steps,
         eps=args.eps,
-        update_lr=args.update_lr,
-        max_grad_norm=args.max_grad_norm,
         num_perturbations=args.num_perturbations,
         subroutine_max_iter=args.subroutine_max_iter,
         subroutine_lr=args.subroutine_lr,

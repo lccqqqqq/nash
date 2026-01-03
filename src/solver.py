@@ -17,22 +17,41 @@ import wandb
 import argparse
 import pickle
 import uuid
+import datetime
 
 # Import from refactored src/ modules
-from mps_utils import (
-    apply_unitary,
-    to_canonical_form,
-    to_comp_basis,
-    from_comp_basis,
-    get_rand_mps,
-    get_rand_state_as_mps,
-    get_product_state,
-    get_ghz_state,
-    apply_random_unitaries,
-    test_canonical_form
-)
-from game import get_default_3players, get_default_2players, get_default_H, get_default_cyclic_players, H_QPD, get_perturbed_H_QPD
-from entanglement import compute_entanglement_params as compute_ent_params_from_state
+try:
+    # When imported as a module (e.g., from src.solver import ...)
+    from src.mps_utils import (
+        apply_unitary,
+        to_canonical_form,
+        to_comp_basis,
+        from_comp_basis,
+        get_rand_mps,
+        get_rand_state_as_mps,
+        get_product_state,
+        get_ghz_state,
+        apply_random_unitaries,
+        test_canonical_form
+    )
+    from src.game import get_default_3players, get_default_2players, get_default_H, get_default_cyclic_players, H_QPD, get_perturbed_H_QPD
+    from src.entanglement import compute_entanglement_params as compute_ent_params_from_state
+except ImportError:
+    # When run directly as a script (e.g., python src/solver.py)
+    from mps_utils import (
+        apply_unitary,
+        to_canonical_form,
+        to_comp_basis,
+        from_comp_basis,
+        get_rand_mps,
+        get_rand_state_as_mps,
+        get_product_state,
+        get_ghz_state,
+        apply_random_unitaries,
+        test_canonical_form
+    )
+    from game import get_default_3players, get_default_2players, get_default_H, get_default_cyclic_players, H_QPD, get_perturbed_H_QPD
+    from entanglement import compute_entanglement_params as compute_ent_params_from_state
 
 
 # Pre-computed Pauli matrices and tensor products for unitary perturbations
@@ -78,13 +97,31 @@ def apply_u(u, psi, idx):
 
 # Depracated... does not need with random initializations
 def kick_with_u(Psi):
+    """
+    Apply random single-qubit unitaries to each site of the MPS.
+
+    The unitaries are real (orthogonal) or complex (unitary) depending on the dtype of Psi.
+    This keeps the state on the same orbit.
+    """
     L = len(Psi)
+    # Detect dtype from the first tensor
+    dtype = Psi[0].dtype
+    is_complex = np.iscomplexobj(Psi[0])
+
     for i in range(L):
-        U = np.linalg.qr(np.random.randn(2, 2))[0]
+        if is_complex:
+            # Generate random complex matrix for complex dtype
+            random_matrix = (np.random.randn(2, 2) + 1j * np.random.randn(2, 2)).astype(dtype)
+        else:
+            # Generate random real matrix for real dtype
+            random_matrix = np.random.randn(2, 2).astype(dtype)
+
+        # QR decomposition gives unitary (complex) or orthogonal (real) matrix
+        U = np.linalg.qr(random_matrix)[0]
         Psi[i] = apply_unitary(U.T.conj(), Psi[i])
     return Psi
 
-def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42):
+def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42, real_strategies=True):
     """
     Compute exploitability of a quantum state for a given player using differential evolution
     to search over all single-qubit unitaries in SU(2).
@@ -95,7 +132,7 @@ def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42):
         player_idx: Index of the player to compute exploitability for
         maxiter: Maximum iterations for differential evolution (default: 300)
         seed: Random seed for differential evolution (default: 42)
-
+        real_strategies: Whether to use real strategies (default: True)
     Returns:
         exploitability: Maximum payoff gain from single-qubit unitary deviation
     """
@@ -103,8 +140,12 @@ def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42):
 
     def uni_dev_payoff(alpha_vec):
         alpha = alpha_vec[0]
-        theta = alpha_vec[1]
-        phi = alpha_vec[2]
+        if real_strategies:
+            theta = math.pi / 2
+            phi = math.pi / 2
+        else:
+            theta = alpha_vec[1]
+            phi = alpha_vec[2]
 
         nx = math.sin(theta) * math.cos(phi)
         ny = math.sin(theta) * math.sin(phi)
@@ -112,9 +153,14 @@ def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42):
 
         # Correct SU(2) parametrization: U = cos(α)I + i·sin(α)(n·σ)
         # This is equivalent to exp(i·α·n·σ)
-        unitary = np.eye(2, dtype=np.complex128) * math.cos(alpha) + 1j * math.sin(alpha) * (
-            nx * PAULIS[0] + ny * PAULIS[1] + nz * PAULIS[2]
-        )
+        if real_strategies: # real inputs
+            unitary = np.eye(2, dtype=np.float64) * math.cos(alpha) + math.sin(alpha) * np.array(
+                [[0, 1], [-1, 0]]
+            )
+        else: # complex inputs
+            unitary = np.eye(2, dtype=np.complex128) * math.cos(alpha) + 1j * math.sin(alpha) * (
+                nx * PAULIS[0] + ny * PAULIS[1] + nz * PAULIS[2]
+            )
 
         psi_dev = apply_u(unitary, psi, [player_idx])
         dE = np.tensordot(H[player_idx], psi_dev, axes=([L+j for j in range(L)], [j for j in range(L)]))
@@ -123,13 +169,15 @@ def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42):
 
     result = differential_evolution(
         uni_dev_payoff,
-        bounds=[(0, math.pi), (0, math.pi), (0, 2*math.pi)],
+        bounds=[(0, math.pi)] if real_strategies else [(0, math.pi), (0, math.pi), (0, 2*math.pi)],
         maxiter=maxiter,
         seed=seed,
         atol=1e-6,
         tol=1e-6,
     )
-    return -result.fun + uni_dev_payoff(np.array([0, 0, 0]))
+
+    plain_payoff = uni_dev_payoff(np.array([0])) if real_strategies else uni_dev_payoff(np.array([0, 0, 0]))
+    return -result.fun + plain_payoff
 
 def find_nash_eq1(
     Psi: list[np.ndarray] | np.ndarray, # allowing for both MPS and computational basis input
@@ -143,6 +191,7 @@ def find_nash_eq1(
     return_history: bool = False,
     expl_maxiter: int = 300,
     expl_seed: int = 42,
+    real_strategies: bool = True,
 ):
     # Convert types to ndarray
     if isinstance(Psi, list) and isinstance(Psi[0], t.Tensor):
@@ -195,7 +244,7 @@ def find_nash_eq1(
 
 
         if n % expl_check_interval == 0:
-            expl = [compute_exploitability(psi, H, i, maxiter=expl_maxiter, seed=expl_seed) for i in range(L)]
+            expl = [compute_exploitability(psi, H, i, maxiter=expl_maxiter, seed=expl_seed, real_strategies=real_strategies) for i in range(L)]
             expl_list.append(expl)
             if sum(expl) < expl_threshold:
                 global_converged = True
@@ -213,6 +262,67 @@ def find_nash_eq1(
     }
 
     return result
+
+def find_nash_eq1_with_retry(
+    Psi: list[np.ndarray] | np.ndarray,
+    H: list[np.ndarray],
+    max_iter: int,
+    base_alpha: float,
+    max_alpha: float,
+    max_retries: int,
+    expl_check_interval: int,
+    expl_maxiter: int,
+    real_strategies: bool,
+    return_history: bool = False,
+):
+    """
+    Try to find Nash equilibrium with increasing learning rates on failure.
+
+    If NE finding fails, retry with progressively higher learning rates up to max_alpha.
+    This addresses premature termination issues in the Nash solver.
+
+    Args:
+        Psi: MPS or computational basis state
+        H: List of Hamiltonian tensors
+        max_iter: Max iterations for Nash solver
+        base_alpha: Initial learning rate (often the current working LR)
+        max_alpha: Maximum learning rate to try
+        max_retries: Number of retry attempts with increasing LRs
+        expl_check_interval: Check exploitability every N iterations
+        expl_maxiter: Max iterations for exploitability computation
+        real_strategies: Whether to use real strategies for exploitability
+        return_history: Whether to return full history
+
+    Returns:
+        result: dict from find_nash_eq1
+        success: bool indicating if Nash equilibrium was found
+        final_alpha: The learning rate that successfully found NE (or last tried LR if failed)
+    """
+    current_alpha = base_alpha
+
+    for retry_count in range(max_retries):
+        result = find_nash_eq1(
+            Psi, H,
+            max_iter=max_iter,
+            alpha=current_alpha,
+            expl_check_interval=expl_check_interval,
+            expl_maxiter=expl_maxiter,
+            real_strategies=real_strategies,
+            return_history=return_history
+        )
+
+        if result['nash_equilibrium']:
+            if retry_count > 0:
+                print(f"Success on retry {retry_count + 1} with LR {current_alpha:.4f}")
+            return result, True, current_alpha
+
+        # Failed - increase LR for next retry
+        if retry_count < max_retries - 1:
+            current_alpha = base_alpha + ((retry_count + 1) / max_retries) * (max_alpha - base_alpha)
+            print(f"Retry {retry_count + 1}/{max_retries} with higher learning rate: {current_alpha:.4f}")
+
+    # All retries failed
+    return result, False, current_alpha
 
 def perturb_state(Psi: list[t.Tensor] | list[np.ndarray] | np.ndarray, lr: float = 0.01, site: int = 0, method: str = 'schmidt'):
     """
@@ -895,12 +1005,13 @@ def metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=Tr
     return df
 
 
-def save_results(save_dir, Psi, metric_logs, **params):
+def save_results(save_dir, Psi, H, metric_logs, **params):
     """Save optimization results with UUID and metadata.
 
     Args:
         save_dir: Directory to save results
         Psi: Final MPS state
+        H: Hamiltonian (list of MPO tensors)
         metric_logs: List of metric dicts from optimization
         **params: All optimization parameters (chi, eps, max_num_steps, etc.)
 
@@ -910,7 +1021,7 @@ def save_results(save_dir, Psi, metric_logs, **params):
     """
     from datetime import datetime
 
-    run_uuid = str(uuid.uuid4())
+    run_uuid = str(uuid.uuid4())[:8]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Build pre-computed DataFrame
@@ -937,11 +1048,12 @@ def save_results(save_dir, Psi, metric_logs, **params):
         'metadata': metadata,
         'metric_logs': metric_logs,
         'dataframe': df,
+        'Hamiltonian': H,
     }
 
     # Save single file with descriptive prefix
     os.makedirs(save_dir, exist_ok=True)
-    filename = f"qpd{num_players}_{run_uuid}.pkl"
+    filename = f"qpd{num_players}_{timestamp}_{run_uuid}.pkl"
     filepath = os.path.join(save_dir, filename)
 
     with open(filepath, 'wb') as f:
@@ -961,6 +1073,10 @@ def opt_fid_state(
     num_perturbations: int = 10, # Number of perturbations to perform at each step to estimate the gradient
     subroutine_max_iter: int = 1000, # Max iter as in the equilibrium-finding subroutine
     subroutine_lr: float = 0.03, # Learning rate as in the equilibrium-finding subroutine
+    max_subroutine_lr: float = 1, # Maximum learning rate for the subroutine
+    expl_check_interval: int = 10, # Check exploitability every N iterations in Nash solver
+    expl_maxiter: int = 300, # Max iterations for exploitability computation (differential evolution)
+    real_strategies: bool = True, # Whether to use real strategies (exp(iY) only) for exploitability
     perturbation_method: str = 'schmidt', # Perturbation method: 'schmidt' or 'unitary'
     use_wandb: bool = False, # Whether to use wandb logging
     wandb_project: str = "nash-equilibrium", # W&B project name
@@ -1000,6 +1116,10 @@ def opt_fid_state(
                 'num_perturbations': num_perturbations,
                 'subroutine_max_iter': subroutine_max_iter,
                 'subroutine_lr': subroutine_lr,
+                'max_subroutine_lr': max_subroutine_lr,
+                'expl_check_interval': expl_check_interval,
+                'expl_maxiter': expl_maxiter,
+                'real_strategies': real_strategies,
                 'perturbation_method': perturbation_method,
                 'chi': Psi[0].shape[1],  # Bond dimension
                 'L': len(Psi),  # Number of players
@@ -1015,9 +1135,30 @@ def opt_fid_state(
             if wandb_config:
                 wandb.config.update(wandb_config, allow_val_change=True)
 
+    # Configuration for retry logic and adaptive LR
+    max_failures_before_abort = 20  # Maximum number of retries (more gradual LR increases)
+    current_working_lr = subroutine_lr  # Track the current effective LR (adapts over time)
+
     # Initialize: find the Nash equilibrium of the fiducial state
     Psi = to_canonical_form(Psi, form='B')
-    baseline_result = find_nash_eq1(Psi, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
+    baseline_result, baseline_success, final_alpha = find_nash_eq1_with_retry(
+        Psi, H,
+        max_iter=subroutine_max_iter,
+        base_alpha=current_working_lr,
+        max_alpha=max_subroutine_lr,
+        max_retries=max_failures_before_abort,
+        expl_check_interval=expl_check_interval,
+        expl_maxiter=expl_maxiter,
+        real_strategies=real_strategies,
+        return_history=False
+    )
+    if not baseline_success:
+        print(f"Warning: Initial baseline NE not found after {max_failures_before_abort} retries, proceeding with non-NE state")
+    else:
+        # Update working LR if a higher one was needed
+        if final_alpha > current_working_lr:
+            print(f"Updated working LR: {subroutine_lr:.4f} → {final_alpha:.4f}")
+            current_working_lr = final_alpha
     Psi = to_canonical_form(baseline_result['state_'], form='B')
 
     metric_logs = []
@@ -1034,25 +1175,90 @@ def opt_fid_state(
 
         for j in range(num_perturbations):
             Psi_ = [psi[j] for psi in Psi_batch]
-            # print(f"Psi_ shape: {to_comp_basis(Psi_).shape}")
-            # sys.stdout.flush()
-            result_ = find_nash_eq1(Psi_, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
-            if result_['nash_equilibrium']:
+
+            result_, success, final_alpha = find_nash_eq1_with_retry(
+                Psi_, H,
+                max_iter=subroutine_max_iter,
+                base_alpha=current_working_lr,  # Use current working LR
+                max_alpha=max_subroutine_lr,
+                max_retries=max_failures_before_abort,
+                expl_check_interval=expl_check_interval,
+                expl_maxiter=expl_maxiter,
+                real_strategies=real_strategies,
+                return_history=False
+            )
+
+            if success:
+                # Update working LR if a higher one was needed
+                if final_alpha > current_working_lr:
+                    print(f"Updated working LR: {current_working_lr:.4f} → {final_alpha:.4f}")
+                    current_working_lr = final_alpha
+
                 # Now result_['energy'] is final energy array (3,) for 3 players
                 energy_diff = sum(result_['energy']) - sum(baseline_result['energy'])
                 energy_diffs.append(energy_diff)
                 valid_param_diffs.append(all_param_diffs[j])  # Only include successful perturbations
+            else:
+                print(f"Perturbation {j+1}/{num_perturbations}: Failed after {max_failures_before_abort} retries, skipping...")
 
-        num_attempts = 0
+        # Check if entire batch failed
         if len(energy_diffs) == 0:
-            print(f"No Nash equilibrium found for any of the {num_perturbations} perturbations. Skipping update. Attempt {num_attempts + 1} of 4.")
-            num_attempts += 1
-            if num_attempts >= 4:
-                print(f"Too many failed attempts, kicking the state with products of random unitaries (so that we are on the same orbit)")
-                Psi = kick_with_u(Psi)
-                baseline_result = find_nash_eq1(Psi, H, max_iter=subroutine_max_iter, alpha=subroutine_lr, return_history=False)
-                Psi = to_canonical_form(baseline_result['state_'], form='B')
-            continue
+            print(f"No Nash equilibrium found for any of the {num_perturbations} perturbations after retries. "
+                  f"Capturing problematic run and aborting optimization.")
+
+            # Run with full history to capture the problematic case
+            problematic_result = find_nash_eq1(
+                Psi, H,
+                max_iter=subroutine_max_iter,
+                alpha=subroutine_lr,
+                expl_check_interval=expl_check_interval,
+                expl_maxiter=expl_maxiter,
+                real_strategies=real_strategies,
+                return_history=True
+            )
+
+            # Save the problematic run to a special directory
+            failed_runs_dir = os.path.join(save_dir, "failed_runs")
+            os.makedirs(failed_runs_dir, exist_ok=True)
+
+            from datetime import datetime
+            failed_run_uuid = str(uuid.uuid4())
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"failed_run_{timestamp}_{failed_run_uuid}.pkl"
+            filepath = os.path.join(failed_runs_dir, filename)
+
+            failed_run_data = {
+                'problematic_result': problematic_result,
+                'current_state': Psi,
+                'Hamiltonian': H,
+                'baseline_result': baseline_result,
+                'metric_logs_so_far': metric_logs,
+                'iteration': i,
+                'num_perturbations': num_perturbations,
+                'metadata': {
+                    'uuid': failed_run_uuid,
+                    'timestamp': timestamp,
+                    'chi': Psi[0].shape[1],
+                    'num_players': len(Psi),
+                    'max_num_steps': max_num_steps,
+                    'eps': eps,
+                    'num_perturbations': num_perturbations,
+                    'subroutine_max_iter': subroutine_max_iter,
+                    'subroutine_lr': subroutine_lr,
+                    'max_subroutine_lr': max_subroutine_lr,
+                    'perturbation_method': perturbation_method,
+                    'seed': seed,
+                }
+            }
+
+            with open(filepath, 'wb') as f:
+                pickle.dump(failed_run_data, f)
+
+            print(f"Problematic run saved to: {filepath}")
+            print(f"Failed run UUID: {failed_run_uuid}")
+
+            # Break out of the optimization loop
+            break
 
         energy_diffs = np.array(energy_diffs)  # Shape: (num_successful,)
         valid_param_diffs = np.stack(valid_param_diffs)  # Shape: (num_successful, param_dim)
@@ -1128,6 +1334,7 @@ def opt_fid_state(
         filepath, run_uuid = save_results(
             save_dir=save_dir,
             Psi=Psi,
+            H=H,
             metric_logs=metric_logs,
             chi=Psi[0].shape[1],
             num_players=len(Psi),
@@ -1136,6 +1343,10 @@ def opt_fid_state(
             num_perturbations=num_perturbations,
             subroutine_max_iter=subroutine_max_iter,
             subroutine_lr=subroutine_lr,
+            max_subroutine_lr=max_subroutine_lr,
+            expl_check_interval=expl_check_interval,
+            expl_maxiter=expl_maxiter,
+            real_strategies=real_strategies,
             perturbation_method=perturbation_method,
             seed=seed,
         )
@@ -1167,6 +1378,10 @@ def parse_args():
         # Nash equilibrium subroutine
         'subroutine_max_iter': 1000,
         'subroutine_lr': 0.009,
+        'max_subroutine_lr': 1.0,
+        'expl_check_interval': 50,
+        'expl_maxiter': 100,
+        'real_strategies': True,
 
         # Logging and saving
         'use_wandb': True,
@@ -1209,6 +1424,16 @@ def parse_args():
                         help='Max iterations for Nash equilibrium finder')
     parser.add_argument('--subroutine-lr', '--alpha', type=float, default=DEFAULTS['subroutine_lr'],
                         help='Learning rate for Nash equilibrium finder')
+    parser.add_argument('--max-subroutine-lr', type=float, default=DEFAULTS['max_subroutine_lr'],
+                        help='Maximum learning rate for Nash equilibrium finder retries')
+    parser.add_argument('--expl-check-interval', type=int, default=DEFAULTS['expl_check_interval'],
+                        help='Check exploitability every N iterations in Nash solver')
+    parser.add_argument('--expl-maxiter', type=int, default=DEFAULTS['expl_maxiter'],
+                        help='Max iterations for exploitability computation (differential evolution)')
+    parser.add_argument('--real-strategies', action='store_true', default=DEFAULTS['real_strategies'],
+                        help='Use real strategies (exp(iY) only) for exploitability computation')
+    parser.add_argument('--no-real-strategies', dest='real_strategies', action='store_false',
+                        help='Use full complex strategies (all SU(2)) for exploitability computation')
 
     # Logging and saving
     parser.add_argument('--use-wandb', action='store_true', default=DEFAULTS['use_wandb'],
@@ -1236,7 +1461,7 @@ def main():
     # Set random seed if provided
     if args.seed is not None:
         np.random.seed(args.seed)
-    
+
     if args.dtype == 'real':
         dtype = np.float32
     elif args.dtype == 'complex':
@@ -1246,12 +1471,16 @@ def main():
 
     # Initialize state and Hamiltonian
     print(f"Initializing random MPS with L={args.num_players}, chi={args.chi}")
-    Psi = get_rand_state_as_mps(L=args.num_players, max_bond_dim=args.chi, seed=args.seed, dtype=dtype)
+    # Note: Uses global random state set above (no need to pass seed again)
+    Psi = get_rand_state_as_mps(L=args.num_players, max_bond_dim=args.chi, dtype=dtype)
 
     if args.non_commutative_norm > 0:
         print(f"CRITICAL: In this run, implement non-commutative payoff")
         print(f"  Non-commutative norm: {args.non_commutative_norm}")
+        print(f"  Seed: {args.seed}")
+
     Hs = get_perturbed_H_QPD(eps=args.non_commutative_norm, dtype=dtype)
+    print(f"  2-Body Interaction Hamiltonians Used: {Hs}")
     H = get_default_cyclic_players(L=args.num_players, Hs=Hs, dtype=dtype)
 
     # Prepare wandb config
@@ -1269,6 +1498,10 @@ def main():
     print(f"  Perturbation method: {args.perturbation_method}")
     print(f"  Subroutine max iter: {args.subroutine_max_iter}")
     print(f"  Subroutine LR: {args.subroutine_lr}")
+    print(f"  Max subroutine LR: {args.max_subroutine_lr}")
+    print(f"  Expl check interval: {args.expl_check_interval}")
+    print(f"  Expl maxiter: {args.expl_maxiter}")
+    print(f"  Real strategies: {args.real_strategies}")
     print(f"  W&B logging: {args.use_wandb}")
     print(f"  Save results: {args.save_results}")
 
@@ -1280,12 +1513,17 @@ def main():
         num_perturbations=args.num_perturbations,
         subroutine_max_iter=args.subroutine_max_iter,
         subroutine_lr=args.subroutine_lr,
+        max_subroutine_lr=args.max_subroutine_lr,
+        expl_check_interval=args.expl_check_interval,
+        expl_maxiter=args.expl_maxiter,
+        real_strategies=args.real_strategies,
         perturbation_method=args.perturbation_method,
         use_wandb=args.use_wandb,
         wandb_project=args.wandb_project,
         wandb_config=wandb_config,
         should_save_results=args.save_results,
-        save_dir=args.save_dir
+        save_dir=args.save_dir,
+        seed=args.seed
     )
 
     # Display summary

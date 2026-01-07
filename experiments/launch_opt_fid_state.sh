@@ -6,8 +6,8 @@ SAVE_DIR=data/tests
 SEED=42
 
 JOB_OUTPUT=$(addqueue -q $QUEUE -n $NCORES -m $MEM_PER_CORE_GB \
-    -o output/opt-fid-state-trail-testfile_%j.out \
-    -c eps0.05 \
+    -o output/opt-fid-state-trail-testfile-eps0.004_%j.out \
+    -c eps0.004 \
     /usr/bin/python3 src/solver.py \
     --non-commutative-norm 0 \
     --seed $SEED \
@@ -15,7 +15,7 @@ JOB_OUTPUT=$(addqueue -q $QUEUE -n $NCORES -m $MEM_PER_CORE_GB \
     --num-players 6 \
     --dtype complex \
     --max-num-steps 1000 \
-    --eps 0.05 \
+    --eps 0.004 \
     --num-perturbations 20 \
     --perturbation-method unitary \
     --subroutine-max-iter 1000 \

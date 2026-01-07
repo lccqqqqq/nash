@@ -18,7 +18,7 @@ NCORES=1  # Number of cores per job
 MEM_PER_CORE=1  # GB per core
 
 # Base save directory
-BASE_SAVE_DIR="data/qpd6"
+BASE_SAVE_DIR="data/qpd6_refined_grad_desc"
 
 echo "======================================================================"
 echo "Submitting Chi Sweep Jobs for Equilibrium Statistics"
@@ -47,10 +47,10 @@ for CHI in "${CHIS[@]}"; do
         # Each job gets a unique seed = 1000000 * CHI + i
         # This ensures: (1) same Hamiltonian for same CHI, (2) different states across jobs
         # Since we only have 1 MPI rank per job, rank=0, so state_seed = SEED + 0 = SEED
-        SEED=$((1000000 * CHI + i))
+        SEED=$((1000001 * CHI + i))
 
         JOB_OUTPUT=$(addqueue -q $QUEUE -n $NCORES -m $MEM_PER_CORE \
-            -o output/qpd6_chi${CHI}_job${i}_%j.out \
+            -o output/qpd_6players_varybonddim_refinedgrad/%j_chi${CHI}_job${i}.out \
             /usr/bin/python3 src/solver.py \
             --non-commutative-norm $NON_COMMUTATIVE_NORM \
             --seed $SEED \

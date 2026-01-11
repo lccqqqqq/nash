@@ -9,6 +9,7 @@ import numpy as np
 np.set_printoptions(precision=3, suppress=True)
 import matplotlib.pyplot as plt
 import math
+from misc import mps_entanglement_spectrum
 from scipy.optimize import differential_evolution
 import einops
 from jaxtyping import Float
@@ -187,9 +188,9 @@ def find_nash_eq1(
     convergence_threshold: float = 1e-7,
     expl_threshold: float = 5e-4,
     use_tqdm: bool = False,
-    expl_check_interval: int = 10,
+    expl_check_interval: int = 50,
     return_history: bool = False,
-    expl_maxiter: int = 300,
+    expl_maxiter: int = 60,
     expl_seed: int = 42,
     real_strategies: bool = True,
 ):
@@ -271,6 +272,7 @@ def find_nash_eq1_with_retry(
     max_alpha: float,
     max_retries: int,
     expl_check_interval: int,
+    expl_threshold: float,
     expl_maxiter: int,
     real_strategies: bool,
     return_history: bool = False,
@@ -289,6 +291,7 @@ def find_nash_eq1_with_retry(
         max_alpha: Maximum learning rate to try
         max_retries: Number of retry attempts with increasing LRs
         expl_check_interval: Check exploitability every N iterations
+        expl_threshold: Exploitability threshold for Nash equilibrium convergence
         expl_maxiter: Max iterations for exploitability computation
         real_strategies: Whether to use real strategies for exploitability
         return_history: Whether to return full history
@@ -306,6 +309,7 @@ def find_nash_eq1_with_retry(
             max_iter=max_iter,
             alpha=current_alpha,
             expl_check_interval=expl_check_interval,
+            expl_threshold=expl_threshold,
             expl_maxiter=expl_maxiter,
             real_strategies=real_strategies,
             return_history=return_history
@@ -548,9 +552,13 @@ def batch_perturb(Psi: list[t.Tensor] | list[np.ndarray] | np.ndarray, batch_siz
     else:
         raise ValueError(f"Unknown perturbation method: {method}. Must be 'schmidt' or 'unitary'.")
 
-def estimate_gradient_ols(dX, dy, lam=0.0):
+def estimate_gradient_ols(dX, dy, lam=0.0, method='ols'):
     """
-    Estimate the gradient of a function f(x) by least squares.
+    Estimate the gradient of a function f(x) by least squares or max welfare selection.
+
+    Two methods available:
+    - 'ols': Ordinary/ridge least squares fit to all samples (default)
+    - 'max_welfare': Select direction of best-performing perturbation (greedy)
 
     Uses SVD-based least squares solver for robustness to singular/near-singular cases.
     When the system is underdetermined (fewer samples than dimensions), returns the
@@ -561,38 +569,111 @@ def estimate_gradient_ols(dX, dy, lam=0.0):
         dy: np.ndarray of shape (n_samples,) - Corresponding function changes
         lam: float - Ridge regularization parameter (optional, default: 0.0)
                      If > 0, uses normal equations with regularization instead of lstsq
+                     Only applies to 'ols' method, ignored for 'max_welfare'
+        method: str - Gradient estimation method: 'ols' or 'max_welfare' (default: 'ols')
 
     Returns:
         np.ndarray of shape (n_dims,) - Gradient estimate
     """
     n_samples, n_dims = dX.shape
 
-    # Check if we have enough samples (warn if underdetermined)
-    if n_samples < n_dims:
-        print(f"  Warning: Only {n_samples} valid samples for {n_dims}-dimensional gradient. "
-              f"Estimate may be unreliable.")
+    # Max welfare selection: pick the best-performing perturbation
+    if method == 'max_welfare':
+        if n_samples == 0:
+            print(f"  Warning: No valid samples for max welfare selection.")
+            return np.zeros(n_dims)
 
-    # Use regularized normal equations if lam > 0, otherwise use lstsq
-    if lam > 0:
-        # Ridge regression: solve (dX.T @ dX + λI) @ g = dX.T @ dy
-        A = dX.T @ dX + lam * np.eye(n_dims)
-        b = dX.T @ dy
-        try:
-            g_hat = np.linalg.solve(A, b)
-        except np.linalg.LinAlgError:
-            # Should not happen with regularization, but fallback to lstsq
-            print("  Warning: Regularized solve failed. Falling back to lstsq.")
+        best_idx = np.argmax(dy)
+        print(f"  Max welfare: {dy[best_idx]:.4f} (sample {best_idx+1}/{n_samples})")
+        return dX[best_idx]
+
+    # Ordinary least squares with optional ridge regularization
+    elif method == 'ols':
+        # Check if we have enough samples (warn if underdetermined)
+        if n_samples < n_dims:
+            print(f"  Warning: Only {n_samples} valid samples for {n_dims}-dimensional gradient. "
+                  f"Estimate may be unreliable.")
+
+        # Use regularized normal equations if lam > 0, otherwise use lstsq
+        if lam > 0:
+            # Ridge regression: solve (dX.T @ dX + λI) @ g = dX.T @ dy
+            A = dX.T @ dX + lam * np.eye(n_dims)
+            b = dX.T @ dy
+            try:
+                g_hat = np.linalg.solve(A, b)
+            except np.linalg.LinAlgError:
+                # Should not happen with regularization, but fallback to lstsq
+                print("  Warning: Regularized solve failed. Falling back to lstsq.")
+                g_hat, residuals, rank, s = np.linalg.lstsq(dX, dy, rcond=None)
+        else:
+            # Direct least squares using SVD (robust to singular matrices)
             g_hat, residuals, rank, s = np.linalg.lstsq(dX, dy, rcond=None)
+
+            # Diagnostic: check if system is rank-deficient
+            if rank < min(n_samples, n_dims):
+                print(f"  Warning: Rank-deficient system (rank {rank}/{min(n_samples, n_dims)}). "
+                      f"Using minimum-norm solution.")
+
+        return g_hat
+
     else:
-        # Direct least squares using SVD (robust to singular matrices)
-        g_hat, residuals, rank, s = np.linalg.lstsq(dX, dy, rcond=None)
+        raise ValueError(f"Unknown gradient estimation method: {method}. Choose 'ols' or 'max_welfare'.")
 
-        # Diagnostic: check if system is rank-deficient
-        if rank < min(n_samples, n_dims):
-            print(f"  Warning: Rank-deficient system (rank {rank}/{min(n_samples, n_dims)}). "
-                  f"Using minimum-norm solution.")
 
-    return g_hat
+def compute_scheduled_eps(eps_0, step, total_steps, schedule_type=None, decay=0.999, min_eps=1e-6):
+    """
+    Compute scheduled perturbation size for current optimization step.
+
+    Supports multiple schedule types for decaying the perturbation magnitude over time.
+    All schedules respect a minimum threshold to prevent numerical issues.
+
+    Args:
+        eps_0: float - Initial perturbation size (at step 0)
+        step: int - Current iteration number (0-indexed)
+        total_steps: int - Total number of optimization steps
+        schedule_type: str or None - Schedule type: 'exponential', 'cosine', 'linear', or None
+                                      If None, returns eps_0 (no scheduling)
+        decay: float - Decay rate for exponential schedule (default: 0.999)
+                      Only used when schedule_type='exponential'
+        min_eps: float - Minimum allowed eps value (default: 1e-6)
+                        Prevents division by very small numbers
+
+    Returns:
+        float - Scheduled eps value for current step, clamped to [min_eps, eps_0]
+
+    Examples:
+        >>> compute_scheduled_eps(0.01, 0, 1000, 'exponential', decay=0.999)
+        0.01  # At step 0
+        >>> compute_scheduled_eps(0.01, 500, 1000, 'cosine')
+        0.005  # At midpoint, cosine gives 0.5 * eps_0
+    """
+    if schedule_type is None:
+        return eps_0
+
+    if schedule_type == 'exponential':
+        # Exponential decay: eps_t = eps_0 * decay^t
+        eps_t = eps_0 * (decay ** step)
+
+    elif schedule_type == 'cosine':
+        # Cosine annealing: smooth decay from eps_0 to 0
+        # Formula: eps_t = eps_0 * 0.5 * (1 + cos(π * t / T))
+        progress = step / max(total_steps - 1, 1)  # Avoid division by zero
+        eps_t = eps_0 * 0.5 * (1 + np.cos(np.pi * progress))
+
+    elif schedule_type == 'linear':
+        # Linear decay: eps_t = eps_0 * (1 - t / T)
+        progress = step / max(total_steps - 1, 1)  # Avoid division by zero
+        eps_t = eps_0 * (1 - progress)
+
+    else:
+        raise ValueError(f"Unknown schedule type: {schedule_type}. "
+                        f"Choose 'exponential', 'cosine', 'linear', or None.")
+
+    # Apply minimum threshold to prevent numerical issues
+    eps_t = max(eps_t, min_eps)
+
+    return eps_t
+
 
 def update_state(Psi, S_grad_est_proj, lr, site):
     """Apply targeted, controlled perturbation to the state.
@@ -873,6 +954,20 @@ def compute_four_qubit_SLOCC_invariants(psi: np.ndarray):
 
     return abs(H), abs(L), abs(M), abs(Dxt)
 
+def compute_bipartite_entanglement_entropies(Psi):
+    """
+    A wrapper function to compute the list of bipartite entanglement entropies from 
+    an MPS state.
+
+    Args:
+        Psi: MPS state
+
+    Returns:
+        np.ndarray: shape (L,) list of bipartite entanglement entropies
+    """
+    Ss = mps_entanglement_spectrum(Psi)
+    return np.array([np.sum(-np.log(s**2) * s**2) for s in Ss])
+
 
 def compute_ent_params_from_state(state, option='I'):
     """
@@ -1080,16 +1175,22 @@ def opt_fid_state(
     H: list[np.ndarray], # Hamiltonian
     max_num_steps: int = 100, # Number of updates on the fiducial state before the program terminates
     eps: float = 0.005, # Learning rate for perturbations (gradient estimation)
+    eps_schedule: str = None, # Schedule type for eps decay: 'exponential', 'cosine', 'linear', or None
+    eps_schedule_decay: float = 0.999, # Decay rate for exponential schedule
+    eps_min: float = 1e-6, # Minimum eps value (prevents numerical issues)
     update_lr: float = None, # Learning rate for state updates (defaults to eps if None)
+    ridge_lam: float = 0.0, # Ridge regularization parameter for OLS (0 = no regularization)
     max_grad_norm: float = 1.0, # Maximum gradient norm for clipping
     num_perturbations: int = 10, # Number of perturbations to perform at each step to estimate the gradient
     subroutine_max_iter: int = 1000, # Max iter as in the equilibrium-finding subroutine
     subroutine_lr: float = 0.03, # Learning rate as in the equilibrium-finding subroutine
     max_subroutine_lr: float = 1, # Maximum learning rate for the subroutine
     expl_check_interval: int = 10, # Check exploitability every N iterations in Nash solver
+    expl_threshold: float = 5e-4, # Exploitability threshold for Nash equilibrium convergence
     expl_maxiter: int = 300, # Max iterations for exploitability computation (differential evolution)
     real_strategies: bool = True, # Whether to use real strategies (exp(iY) only) for exploitability
     perturbation_method: str = 'schmidt', # Perturbation method: 'schmidt' or 'unitary'
+    gradient_method: str = 'ols', # Gradient estimation method: 'ols' or 'max_welfare'
     track_fidelity: bool = False, # Whether to track state fidelity (expensive for large systems)
     use_wandb: bool = False, # Whether to use wandb logging
     wandb_project: str = "nash-equilibrium", # W&B project name
@@ -1130,7 +1231,11 @@ def opt_fid_state(
             config = {
                 'max_num_steps': max_num_steps,
                 'eps': eps,
+                'eps_schedule': eps_schedule,
+                'eps_schedule_decay': eps_schedule_decay,
+                'eps_min': eps_min,
                 'update_lr': update_lr,
+                'ridge_lam': ridge_lam,
                 'max_grad_norm': max_grad_norm,
                 'num_perturbations': num_perturbations,
                 'subroutine_max_iter': subroutine_max_iter,
@@ -1140,6 +1245,7 @@ def opt_fid_state(
                 'expl_maxiter': expl_maxiter,
                 'real_strategies': real_strategies,
                 'perturbation_method': perturbation_method,
+                'gradient_method': gradient_method,
                 'chi': Psi[0].shape[1],  # Bond dimension
                 'L': len(Psi),  # Number of players
             }
@@ -1167,6 +1273,7 @@ def opt_fid_state(
         max_alpha=max_subroutine_lr,
         max_retries=max_failures_before_abort,
         expl_check_interval=expl_check_interval,
+        expl_threshold=expl_threshold,
         expl_maxiter=expl_maxiter,
         real_strategies=real_strategies,
         return_history=False
@@ -1187,10 +1294,20 @@ def opt_fid_state(
     pbar = tqdm(range(max_num_steps), desc="Optimizing fiducial state")
 
     for i in pbar:
+        # Compute scheduled perturbation size
+        eps_current = compute_scheduled_eps(
+            eps_0=eps,
+            step=i,
+            total_steps=max_num_steps,
+            schedule_type=eps_schedule,
+            decay=eps_schedule_decay,
+            min_eps=eps_min
+        )
+
         # perturb at specific site
         site = i % (len(Psi) - 1)
         Psi_batch, original_param, batch_perturbed_param = batch_perturb(
-            Psi, batch_size=num_perturbations, lr=eps, site=site, method=perturbation_method
+            Psi, batch_size=num_perturbations, lr=eps_current, site=site, method=perturbation_method
         )
 
         energy_diffs = []
@@ -1207,6 +1324,7 @@ def opt_fid_state(
                 max_alpha=max_subroutine_lr,
                 max_retries=max_failures_before_abort,
                 expl_check_interval=expl_check_interval,
+                expl_threshold=expl_threshold,
                 expl_maxiter=expl_maxiter,
                 real_strategies=real_strategies,
                 return_history=False
@@ -1287,11 +1405,11 @@ def opt_fid_state(
         energy_diffs = np.array(energy_diffs)  # Shape: (num_successful,)
         valid_param_diffs = np.stack(valid_param_diffs)  # Shape: (num_successful, param_dim)
 
-        grad_est = estimate_gradient_ols(valid_param_diffs, energy_diffs)  # Shape: (param_dim,)
+        grad_est = estimate_gradient_ols(valid_param_diffs, energy_diffs, lam=ridge_lam, method=gradient_method)  # Shape: (param_dim,)
 
-        # Scale gradient by 1/eps to get true gradient
-        # (energy_diffs come from perturbations of size eps, so gradient = ΔE/eps)
-        grad_est = grad_est / eps
+        # Scale gradient by 1/eps_current to get true gradient
+        # (energy_diffs come from perturbations of size eps_current, so gradient = ΔE/eps_current)
+        grad_est = grad_est / eps_current
         grad_norm = np.linalg.norm(grad_est)
 
         # Optionally store state before update (for fidelity calculation)
@@ -1323,6 +1441,7 @@ def opt_fid_state(
             max_alpha=max_subroutine_lr,
             max_retries=max_failures_before_abort,
             expl_check_interval=expl_check_interval,
+            expl_threshold=expl_threshold,
             expl_maxiter=expl_maxiter,
             real_strategies=real_strategies,
             return_history=False
@@ -1345,7 +1464,7 @@ def opt_fid_state(
             psi_comp = to_comp_basis(Psi).reshape([2] * num_players)
             ent_params = compute_ent_params_from_state(psi_comp, option='I')
         else:
-            ent_params = None
+            ent_params = compute_bipartite_entanglement_entropies(Psi)
 
         metrics = {
             'energy': baseline_result['energy'],
@@ -1367,6 +1486,8 @@ def opt_fid_state(
         }
         if track_fidelity:
             postfix_dict['fidelity'] = f'{fidelity:.4f}'
+        if eps_schedule is not None:
+            postfix_dict['eps'] = f'{eps_current:.4f}'
         pbar.set_postfix(postfix_dict)
 
         # Log to wandb (at specified interval or on last step)
@@ -1380,13 +1501,15 @@ def opt_fid_state(
             }
             if track_fidelity:
                 wandb_metrics['fidelity'] = fidelity  # State update fidelity
+            if eps_schedule is not None:
+                wandb_metrics['eps_current'] = eps_current  # Scheduled perturbation size
 
             # Add entanglement parameters with appropriate labels (only for 3 or 4 qubits)
             if ent_params is not None:
-                if len(ent_params) == 5:
+                if num_players == 3:
                     # 3-qubit case: I1, I2, I3, I4, I5
                     param_names = ['I1', 'I2', 'I3', 'I4', 'I5']
-                elif len(ent_params) == 4:
+                elif num_players == 4:
                     # 4-qubit case: H, L, M, Dxt
                     param_names = ['H', 'L', 'M', 'Dxt']
                 else:
@@ -1455,10 +1578,15 @@ def parse_args():
         # Optimization parameters
         'max_num_steps': 1000,
         'eps': 0.01,
+        'eps_schedule': None,
+        'eps_schedule_decay': 0.999,
+        'eps_min': 1e-6,
         'update_lr': None,  # Defaults to eps if not specified
+        'ridge_lam': 0.0,
         'max_grad_norm': 1.0,
         'num_perturbations': 20,
         'perturbation_method': 'unitary',
+        'gradient_method': 'ols',
         'track_fidelity': False,
 
         # Nash equilibrium subroutine
@@ -1466,6 +1594,7 @@ def parse_args():
         'subroutine_lr': 0.009,
         'max_subroutine_lr': 1.0,
         'expl_check_interval': 50,
+        'expl_threshold': 5e-4,
         'expl_maxiter': 100,
         'real_strategies': True,
 
@@ -1508,6 +1637,20 @@ def parse_args():
     parser.add_argument('--perturbation-method', type=str, default=DEFAULTS['perturbation_method'],
                         choices=['schmidt', 'unitary'],
                         help='Perturbation method: schmidt (singular values) or unitary (Pauli coefficients)')
+    parser.add_argument('--gradient-method', type=str, default=DEFAULTS['gradient_method'],
+                        choices=['ols', 'max_welfare'],
+                        help='Gradient estimation method: ols (least squares) or max_welfare (best direction)')
+    parser.add_argument('--ridge-lam', '--lam', type=float, default=DEFAULTS['ridge_lam'],
+                        help='Ridge regularization parameter for OLS (0 = no regularization)')
+    parser.add_argument('--eps-schedule', type=str, default=DEFAULTS['eps_schedule'],
+                        choices=['exponential', 'cosine', 'linear'],
+                        help='Schedule type for eps decay (omit for no scheduling)')
+    parser.add_argument('--eps-schedule-decay', type=float, default=DEFAULTS['eps_schedule_decay'],
+                        help='Decay rate for exponential eps schedule')
+    parser.add_argument('--eps-min', type=float, default=DEFAULTS['eps_min'],
+                        help='Minimum eps value (prevents numerical issues)')
+    parser.add_argument('--track-fidelity', action='store_true', default=DEFAULTS['track_fidelity'],
+                        help='Track state fidelity during optimization (expensive)')
 
     # Nash equilibrium subroutine parameters
     parser.add_argument('--subroutine-max-iter', type=int, default=DEFAULTS['subroutine_max_iter'],
@@ -1518,6 +1661,8 @@ def parse_args():
                         help='Maximum learning rate for Nash equilibrium finder retries')
     parser.add_argument('--expl-check-interval', type=int, default=DEFAULTS['expl_check_interval'],
                         help='Check exploitability every N iterations in Nash solver')
+    parser.add_argument('--expl-threshold', type=float, default=DEFAULTS['expl_threshold'],
+                        help='Exploitability threshold for Nash equilibrium convergence')
     parser.add_argument('--expl-maxiter', type=int, default=DEFAULTS['expl_maxiter'],
                         help='Max iterations for exploitability computation (differential evolution)')
     parser.add_argument('--real-strategies', action='store_true', default=DEFAULTS['real_strategies'],
@@ -1584,7 +1729,12 @@ def main():
     print(f"Starting optimization:")
     print(f"  Steps: {args.max_num_steps}")
     print(f"  Perturbation LR (eps): {args.eps}")
+    if args.eps_schedule is not None:
+        print(f"  Eps schedule: {args.eps_schedule} (decay={args.eps_schedule_decay}, min={args.eps_min})")
     print(f"  Update LR: {args.update_lr if args.update_lr is not None else f'{args.eps} (same as eps)'}")
+    print(f"  Gradient method: {args.gradient_method}")
+    if args.ridge_lam > 0:
+        print(f"  Ridge regularization (lambda): {args.ridge_lam}")
     print(f"  Max gradient norm: {args.max_grad_norm}")
     print(f"  Perturbations: {args.num_perturbations}")
     print(f"  Perturbation method: {args.perturbation_method}")
@@ -1602,16 +1752,23 @@ def main():
         Psi, H,
         max_num_steps=args.max_num_steps,
         eps=args.eps,
+        eps_schedule=args.eps_schedule,
+        eps_schedule_decay=args.eps_schedule_decay,
+        eps_min=args.eps_min,
         update_lr=args.update_lr,
+        ridge_lam=args.ridge_lam,
         max_grad_norm=args.max_grad_norm,
         num_perturbations=args.num_perturbations,
         subroutine_max_iter=args.subroutine_max_iter,
         subroutine_lr=args.subroutine_lr,
         max_subroutine_lr=args.max_subroutine_lr,
         expl_check_interval=args.expl_check_interval,
+        expl_threshold=args.expl_threshold,
         expl_maxiter=args.expl_maxiter,
         real_strategies=args.real_strategies,
         perturbation_method=args.perturbation_method,
+        gradient_method=args.gradient_method,
+        track_fidelity=args.track_fidelity,
         use_wandb=args.use_wandb,
         wandb_project=args.wandb_project,
         wandb_config=wandb_config,

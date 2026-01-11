@@ -1,0 +1,22 @@
+# Minimal requirements for cmaes.py
+# Install with: /usr/bin/python3 -m pip install --user -r requirements_cmaes.txt
+
+# Core JAX stack (with CUDA 12 support)
+# For CPU-only: jax>=0.4.23
+# For GPU: install with: pip install --upgrade "jax[cuda12]>=0.4.23"
+jax>=0.4.23
+numpy==1.26.0
+
+# CMA-ES (evosax requires flax)
+evosax>=0.1.6
+flax>=0.6.0
+msgpack>=1.0.0
+
+# Tensor operations
+einops==0.8.1
+
+# Scientific computing (for Nash solver and exploitability)
+scipy>=1.10.0
+
+# For existing code compatibility (mps_utils, solver)
+tqdm>=4.60.0

@@ -1,6 +1,6 @@
 #!/bin/bash -l
 echo =========================================================   
-echo Job submitted  date = Sun 11 Jan 16:25:57 GMT 2026      
+echo Job submitted  date = Thu  8 Jan 15:21:22 GMT 2026      
 date_start=`date +%s`
 echo $SLURM_JOB_NUM_NODES nodes \( $SLURM_CPUS_ON_NODE processes per node \)        
 echo $SLURM_JOB_NUM_NODES hosts used: $SLURM_JOB_NODELIST      
@@ -15,7 +15,7 @@ echo
 ulimit -l unlimited
 
 export OMP_NUM_THEADS=1
- nice -n 10 /usr/bin/python3 cmaes.py
+ /usr/local/shared/slurm/bin/srun -u -n 1 --mpi=pmix --mem-per-cpu=4096 nice -n 10 /usr/bin/python -u cmaes.py --L 6 --chi 4 --pop-size 64 --n-generations 1000 --nash-alpha 0.01 --nash-iters 3000 --validation-interval 50 --expl-threshold 1e-3 --seed 42 --save-dir data/cmaes/L6_chi4
   echo ---------------                                           
   echo Job output ends                                           
 

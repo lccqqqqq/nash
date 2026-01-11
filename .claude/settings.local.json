@@ -14,7 +14,14 @@
       "Bash(mkdir:*)",
       "Bash(tree:*)",
       "Bash(xargs:*)",
-      "Bash(source:*)"
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(showq:*)",
+      "Bash(bash:*)",
+      "Bash(for i in {1..12})",
+      "Bash(do sleep 3)",
+      "Bash(if ls -t python3-*.out)"
     ],
     "deny": [],
     "ask": []

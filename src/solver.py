@@ -276,25 +276,32 @@ def find_nash_eq1_with_retry(
     expl_maxiter: int,
     real_strategies: bool,
     return_history: bool = False,
+    min_alpha: float = 0.01,
 ):
     """
-    Try to find Nash equilibrium with increasing learning rates on failure.
+    Try to find Nash equilibrium with adaptive learning rate adjustments.
 
-    If NE finding fails, retry with progressively higher learning rates up to max_alpha.
-    This addresses premature termination issues in the Nash solver.
+    Uses an adaptive strategy based on convergence indicators:
+    - If not converging (neither locally nor globally): increase LR to make progress
+    - If locally converged but not globally: decrease LR to avoid overshooting
+    - If globally converged: return success
+
+    The learning rate is adjusted additively by a fixed step size computed as
+    (max_alpha - base_alpha) / max_retries, bounded by [min_alpha, max_alpha].
 
     Args:
         Psi: MPS or computational basis state
         H: List of Hamiltonian tensors
         max_iter: Max iterations for Nash solver
-        base_alpha: Initial learning rate (often the current working LR)
-        max_alpha: Maximum learning rate to try
-        max_retries: Number of retry attempts with increasing LRs
+        base_alpha: Initial learning rate (starting point)
+        max_alpha: Maximum learning rate bound
+        max_retries: Number of retry attempts with adaptive LR
         expl_check_interval: Check exploitability every N iterations
         expl_threshold: Exploitability threshold for Nash equilibrium convergence
         expl_maxiter: Max iterations for exploitability computation
         real_strategies: Whether to use real strategies for exploitability
         return_history: Whether to return full history
+        min_alpha: Minimum learning rate bound (default: 0.01)
 
     Returns:
         result: dict from find_nash_eq1
@@ -302,6 +309,7 @@ def find_nash_eq1_with_retry(
         final_alpha: The learning rate that successfully found NE (or last tried LR if failed)
     """
     current_alpha = base_alpha
+    alpha_step = (max_alpha - base_alpha) / max(max_retries, 1)  # Prevent division by zero
 
     for retry_count in range(max_retries):
         result = find_nash_eq1(
@@ -320,10 +328,16 @@ def find_nash_eq1_with_retry(
                 print(f"Success on retry {retry_count + 1} with LR {current_alpha:.4f}")
             return result, True, current_alpha
 
-        # Failed - increase LR for next retry
+        # Adaptive LR adjustment based on convergence state
         if retry_count < max_retries - 1:
-            current_alpha = base_alpha + ((retry_count + 1) / max_retries) * (max_alpha - base_alpha)
-            print(f"Retry {retry_count + 1}/{max_retries} with higher learning rate: {current_alpha:.4f}")
+            if not result['nash_state'] and not result['nash_equilibrium']:
+                # Not making progress → increase LR by fixed step
+                current_alpha = min(current_alpha + alpha_step, max_alpha)
+                print(f"Retry {retry_count + 1}/{max_retries}: No convergence - increasing LR to {current_alpha:.4f}")
+            elif result['nash_state'] and not result['nash_equilibrium']:
+                # Locally converged but overshooting globally → decrease LR by fixed step
+                current_alpha = max(current_alpha - alpha_step, min_alpha)
+                print(f"Retry {retry_count + 1}/{max_retries}: Local convergence but not global - decreasing LR to {current_alpha:.4f}")
 
     # All retries failed
     return result, False, current_alpha
@@ -1185,6 +1199,7 @@ def opt_fid_state(
     subroutine_max_iter: int = 1000, # Max iter as in the equilibrium-finding subroutine
     subroutine_lr: float = 0.03, # Learning rate as in the equilibrium-finding subroutine
     max_subroutine_lr: float = 1, # Maximum learning rate for the subroutine
+    min_subroutine_lr: float = 0.01, # Minimum learning rate for the subroutine retry
     expl_check_interval: int = 10, # Check exploitability every N iterations in Nash solver
     expl_threshold: float = 5e-4, # Exploitability threshold for Nash equilibrium convergence
     expl_maxiter: int = 300, # Max iterations for exploitability computation (differential evolution)
@@ -1276,14 +1291,15 @@ def opt_fid_state(
         expl_threshold=expl_threshold,
         expl_maxiter=expl_maxiter,
         real_strategies=real_strategies,
-        return_history=False
+        return_history=False,
+        min_alpha=min_subroutine_lr
     )
     if not baseline_success:
         print(f"Warning: Initial baseline NE not found after {max_failures_before_abort} retries, proceeding with non-NE state")
     else:
-        # Update working LR if a higher one was needed
-        if final_alpha > current_working_lr:
-            print(f"Updated working LR: {subroutine_lr:.4f} → {final_alpha:.4f}")
+        # Update working LR to the successful value (whether higher or lower)
+        if final_alpha != current_working_lr:
+            print(f"Updated working LR: {current_working_lr:.4f} → {final_alpha:.4f}")
             current_working_lr = final_alpha
     Psi = to_canonical_form(baseline_result['state_'], form='B')
 
@@ -1327,12 +1343,13 @@ def opt_fid_state(
                 expl_threshold=expl_threshold,
                 expl_maxiter=expl_maxiter,
                 real_strategies=real_strategies,
-                return_history=False
+                return_history=False,
+                min_alpha=min_subroutine_lr
             )
 
             if success:
-                # Update working LR if a higher one was needed
-                if final_alpha > current_working_lr:
+                # Update working LR to the successful value (whether higher or lower)
+                if final_alpha != current_working_lr:
                     print(f"Updated working LR: {current_working_lr:.4f} → {final_alpha:.4f}")
                     current_working_lr = final_alpha
 
@@ -1444,14 +1461,15 @@ def opt_fid_state(
             expl_threshold=expl_threshold,
             expl_maxiter=expl_maxiter,
             real_strategies=real_strategies,
-            return_history=False
+            return_history=False,
+            min_alpha=min_subroutine_lr
         )
 
         if not baseline_success:
             print(f"Warning: No Nash Equilibrium found after {max_failures_before_abort} retries with max LR {max_subroutine_lr:.4f}, using non-NE state")
         else:
-            # Update working LR if a higher one was needed
-            if final_alpha > current_working_lr:
+            # Update working LR to the successful value (whether higher or lower)
+            if final_alpha != current_working_lr:
                 print(f"Updated working LR: {current_working_lr:.4f} → {final_alpha:.4f}")
                 current_working_lr = final_alpha
 
@@ -1593,6 +1611,7 @@ def parse_args():
         'subroutine_max_iter': 1000,
         'subroutine_lr': 0.009,
         'max_subroutine_lr': 1.0,
+        'min_subroutine_lr': 0.01,
         'expl_check_interval': 50,
         'expl_threshold': 5e-4,
         'expl_maxiter': 100,
@@ -1659,6 +1678,8 @@ def parse_args():
                         help='Learning rate for Nash equilibrium finder')
     parser.add_argument('--max-subroutine-lr', type=float, default=DEFAULTS['max_subroutine_lr'],
                         help='Maximum learning rate for Nash equilibrium finder retries')
+    parser.add_argument('--min-subroutine-lr', type=float, default=DEFAULTS['min_subroutine_lr'],
+                        help='Minimum learning rate for Nash equilibrium finder retries')
     parser.add_argument('--expl-check-interval', type=int, default=DEFAULTS['expl_check_interval'],
                         help='Check exploitability every N iterations in Nash solver')
     parser.add_argument('--expl-threshold', type=float, default=DEFAULTS['expl_threshold'],
@@ -1762,6 +1783,7 @@ def main():
         subroutine_max_iter=args.subroutine_max_iter,
         subroutine_lr=args.subroutine_lr,
         max_subroutine_lr=args.max_subroutine_lr,
+        min_subroutine_lr=args.min_subroutine_lr,
         expl_check_interval=args.expl_check_interval,
         expl_threshold=args.expl_threshold,
         expl_maxiter=args.expl_maxiter,

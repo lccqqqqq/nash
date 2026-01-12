@@ -1,15 +1,19 @@
 #!/bin/bash
 # Test new solver features: gradient methods, ridge regularization, and eps scheduling
 # Submits jobs for different CHI values and gradient method configurations
+#
+# Usage: ./test_new_solver.sh [NUM_PLAYERS] [NON_COMMUTATIVE_NORM] [ALPHA] [MAX_ALPHA] [MIN_ALPHA] [NUM_JOBS_PER_CONFIG] [EXPL_THRESHOLD]
+# Defaults: NUM_PLAYERS=6, NON_COMMUTATIVE_NORM=0, ALPHA=0.01, MAX_ALPHA=0.8, MIN_ALPHA=0.001, NUM_JOBS_PER_CONFIG=10, EXPL_THRESHOLD=1e-8
 
 # Configuration
 NUM_PLAYERS=${1:-6}
 NON_COMMUTATIVE_NORM=${2:-0}
-ALPHA=${3:-0.01}
+ALPHA=${3:-0.02}
 MAX_ALPHA=${4:-0.8}
-NUM_JOBS_PER_CONFIG=${5:-10}
+MIN_ALPHA=${5:-0.01}  # Min LR for adaptive retry (should be < ALPHA)
+NUM_JOBS_PER_CONFIG=${6:-20}
 
-EXPL_THRESHOLD=${6:-1e-10}
+EXPL_THRESHOLD=${7:-1e-7}
 
 # CHI values to test (smaller set for testing new features)
 CHIS=(2 4 6 8 16)
@@ -28,7 +32,7 @@ NCORES=1  # Number of cores per job
 MEM_PER_CORE=1  # GB per core
 
 # Base save directory (new directory for testing new features)
-BASE_SAVE_DIR="data/qpd6_new_solver_test_tight_expl_threshold_smallsublr"
+BASE_SAVE_DIR="data/qpd6_new_solver_test_adaptiveLR"
 
 echo "======================================================================"
 echo "Testing New Solver Features: Gradient Methods + Ridge + Eps Scheduling"
@@ -38,6 +42,7 @@ echo "  Number of players: $NUM_PLAYERS"
 echo "  Non-commutative norm: $NON_COMMUTATIVE_NORM"
 echo "  Alpha (base): $ALPHA"
 echo "  Max alpha: $MAX_ALPHA"
+echo "  Min alpha: $MIN_ALPHA"
 echo "  Expl threshold: $EXPL_THRESHOLD"
 echo "  Jobs per configuration: $NUM_JOBS_PER_CONFIG"
 echo "  CHI values: ${CHIS[@]}"
@@ -79,7 +84,7 @@ for CHI in "${CHIS[@]}"; do
             SEED=$((1000001 * CHI + CONFIG_INDEX * 10000 + i))
 
             JOB_OUTPUT=$(addqueue -q $QUEUE -n $NCORES -m $MEM_PER_CORE \
-                -o output/qpd_new_solver_test_tight_expl_threshold_smallsublr/%j_chi${CHI}_${CONFIG_DESC}_job${i}.out \
+                -o output/qpd_new_solver_test_adaptiveLR/%j_chi${CHI}_${CONFIG_DESC}_job${i}.out \
                 -c solver_test \
                 /usr/bin/python3 src/solver.py \
                 --non-commutative-norm $NON_COMMUTATIVE_NORM \
@@ -97,11 +102,12 @@ for CHI in "${CHIS[@]}"; do
                 --subroutine-max-iter 1000 \
                 --subroutine-lr $ALPHA \
                 --max-subroutine-lr $MAX_ALPHA \
+                --min-subroutine-lr $MIN_ALPHA \
                 --expl-check-interval 50 \
                 --expl-maxiter 80 \
                 --expl-threshold $EXPL_THRESHOLD \
                 --wandb-project quantum-nash-new-solver \
-                --wandb-experiment tight_expl_threshold_smallsublr \
+                --wandb-experiment adaptiveLR \
                 --save-dir $SAVE_DIR \
                 --real-strategies \
                 2>&1)
@@ -142,6 +148,7 @@ echo "Features tested:"
 echo "  ✓ Gradient methods: max_welfare, ols"
 echo "  ✓ Ridge regularization: 0, 0.01"
 echo "  ✓ Eps scheduling: cosine"
+echo "  ✓ Adaptive retry: LR ∈ [$MIN_ALPHA, $MAX_ALPHA]"
 echo ""
 echo "Results will be saved to:"
 for CHI in "${CHIS[@]}"; do

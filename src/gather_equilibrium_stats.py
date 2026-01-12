@@ -50,6 +50,7 @@ def gather_equilibrium_statistics(
     max_iter: int = 1000,
     alpha: float = 0.06,
     max_alpha: float = 1.0,
+    min_alpha: float = 0.01,
     max_retries: int = 20,
     convergence_threshold: float = 1e-6,
     expl_threshold: float = 1e-3,
@@ -78,7 +79,8 @@ def gather_equilibrium_statistics(
         max_iter: Maximum iterations for Nash equilibrium solver
         alpha: Base learning rate for differential best response dynamics
         max_alpha: Maximum learning rate for retries (default: 1.0)
-        max_retries: Maximum number of retry attempts with increasing LR (default: 20)
+        min_alpha: Minimum learning rate for retries (default: 0.01)
+        max_retries: Maximum number of retry attempts with adaptive LR (default: 20)
         convergence_threshold: Local convergence threshold (energy change)
         expl_threshold: Global convergence threshold (exploitability)
         use_tqdm: Show progress bar
@@ -119,9 +121,11 @@ def gather_equilibrium_statistics(
             max_alpha=max_alpha,
             max_retries=max_retries,
             expl_check_interval=expl_check_interval,
+            expl_threshold=expl_threshold,
             expl_maxiter=expl_maxiter,
             real_strategies=real_strategies,
             return_history=return_history,
+            min_alpha=min_alpha,
         )
 
         # Add retry metadata to result
@@ -199,6 +203,8 @@ def main():
                         help='Base learning rate for differential best response dynamics')
     parser.add_argument('--max-alpha', type=float, default=1.0,
                         help='Maximum learning rate for retry attempts')
+    parser.add_argument('--min-alpha', type=float, default=0.01,
+                        help='Minimum learning rate for retry attempts')
     parser.add_argument('--max-retries', type=int, default=20,
                         help='Maximum number of retry attempts with increasing LR')
     parser.add_argument('--convergence-threshold', type=float, default=1e-6,
@@ -305,6 +311,7 @@ def main():
         max_iter=args.max_iter,
         alpha=args.alpha,
         max_alpha=args.max_alpha,
+        min_alpha=args.min_alpha,
         max_retries=args.max_retries,
         convergence_threshold=args.convergence_threshold,
         expl_threshold=args.expl_threshold,

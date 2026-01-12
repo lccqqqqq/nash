@@ -19,6 +19,7 @@ import argparse
 import pickle
 import uuid
 import datetime
+import copy
 
 # Import from refactored src/ modules
 try:
@@ -139,6 +140,26 @@ def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42, real_strate
     """
     L = psi.ndim
 
+    # Detect input dtype and warn if not recommended precision
+    input_dtype = psi.dtype
+    is_complex_input = np.iscomplexobj(psi)
+
+    if real_strategies:
+        recommended_dtype = np.float64
+        unitary_dtype = input_dtype if np.isrealobj(psi) else np.float64
+    else:
+        recommended_dtype = np.complex128
+        unitary_dtype = input_dtype if is_complex_input else np.complex128
+
+    if input_dtype != recommended_dtype:
+        import warnings
+        warnings.warn(
+            f"Input state dtype is {input_dtype}, but recommended dtype is {recommended_dtype}. "
+            f"This may cause precision issues in exploitability calculation. "
+            f"Consider using dtype={recommended_dtype} when initializing states.",
+            UserWarning
+        )
+
     def uni_dev_payoff(alpha_vec):
         alpha = alpha_vec[0]
         if real_strategies:
@@ -155,11 +176,11 @@ def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42, real_strate
         # Correct SU(2) parametrization: U = cos(α)I + i·sin(α)(n·σ)
         # This is equivalent to exp(i·α·n·σ)
         if real_strategies: # real inputs
-            unitary = np.eye(2, dtype=np.float64) * math.cos(alpha) + math.sin(alpha) * np.array(
-                [[0, 1], [-1, 0]]
+            unitary = np.eye(2, dtype=unitary_dtype) * math.cos(alpha) + math.sin(alpha) * np.array(
+                [[0, 1], [-1, 0]], dtype=unitary_dtype
             )
         else: # complex inputs
-            unitary = np.eye(2, dtype=np.complex128) * math.cos(alpha) + 1j * math.sin(alpha) * (
+            unitary = np.eye(2, dtype=unitary_dtype) * math.cos(alpha) + 1j * math.sin(alpha) * (
                 nx * PAULIS[0] + ny * PAULIS[1] + nz * PAULIS[2]
             )
 
@@ -179,6 +200,62 @@ def compute_exploitability(psi, H, player_idx, maxiter=300, seed=42, real_strate
 
     plain_payoff = uni_dev_payoff(np.array([0])) if real_strategies else uni_dev_payoff(np.array([0, 0, 0]))
     return -result.fun + plain_payoff
+
+def compute_distance_to_orbit(Psi, real_strategies=False, maxiter=2000, seed=42, dtype=np.complex128):
+    """
+    Compute the distance between two states in the orbit of the unitary group.
+    FIXED VERSION with consistent dtypes.
+    """
+    psi = to_comp_basis(Psi)
+    
+    # Use consistent dtype!
+    ghz_state = np.zeros(2**len(Psi), dtype=dtype)
+    ghz_state[0] = 1 / math.sqrt(2)
+    ghz_state[-1] = 1 / math.sqrt(2)
+    ghz_state = ghz_state.reshape([2]*len(Psi))
+
+    def eval_distance(unitaries_vec):
+        alphas = unitaries_vec[0:len(Psi)]
+        if real_strategies:
+            theta = np.ones(len(Psi)) * math.pi / 2
+            phi = np.ones(len(Psi)) * math.pi / 2
+        else:
+            theta = unitaries_vec[len(Psi):2*len(Psi)]
+            phi = unitaries_vec[2*len(Psi):3*len(Psi)]
+        
+        nx_list = np.sin(theta) * np.cos(phi)
+        ny_list = np.sin(theta) * np.sin(phi)
+        nz_list = np.cos(theta)
+
+        U_list = []
+        for alpha, nx, ny, nz in zip(alphas, nx_list, ny_list, nz_list):
+            if real_strategies:
+                U = np.eye(2, dtype=np.float64) * math.cos(alpha) + math.sin(alpha) * np.array(
+                    [[0, 1], [-1, 0]]
+                )
+            else:
+                U = np.eye(2, dtype=dtype) * math.cos(alpha) + 1j * math.sin(alpha) * (
+                    nx * PAULIS[0] + ny * PAULIS[1] + nz * PAULIS[2]
+                )
+            U_list.append(U)
+        
+        ghz_rotated = ghz_state.copy()
+        for i in range(len(Psi)):
+            ghz_rotated = apply_u(U_list[i], ghz_rotated, [i])
+        
+        return np.sqrt(2 * (1 - np.abs(np.vdot(psi, ghz_rotated))**2))
+    
+    result = differential_evolution(
+        eval_distance,
+        bounds=[(0, math.pi) for _ in range(len(Psi))] if real_strategies else [(0, math.pi) for _ in range(2 * len(Psi))] + [(0, 2*math.pi) for _ in range(len(Psi))],
+        maxiter=maxiter,
+        seed=seed,
+        atol=1e-8,
+        tol=1e-8,
+        polish=True,  # Added for better convergence
+    )
+
+    return result.fun
 
 def find_nash_eq1(
     Psi: list[np.ndarray] | np.ndarray, # allowing for both MPS and computational basis input
@@ -1124,7 +1201,7 @@ def metrics_to_dataframe(metric_logs, include_state=False, include_ent_params=Tr
     return df
 
 
-def save_results(save_dir, Psi, H, metric_logs, **params):
+def save_results(save_dir, Psi, H, metric_logs, failed_runs=None, failed_run_metadata=None, **params):
     """Save optimization results with UUID and metadata.
 
     Args:
@@ -1132,6 +1209,8 @@ def save_results(save_dir, Psi, H, metric_logs, **params):
         Psi: Final MPS state
         H: Hamiltonian (list of MPO tensors)
         metric_logs: List of metric dicts from optimization
+        failed_runs: List of failed Nash equilibrium attempts (optional)
+        failed_run_metadata: Metadata for reproducing failed runs (optional)
         **params: All optimization parameters (chi, eps, max_num_steps, etc.)
 
     Returns:
@@ -1168,6 +1247,8 @@ def save_results(save_dir, Psi, H, metric_logs, **params):
         'metric_logs': metric_logs,
         'dataframe': df,
         'Hamiltonian': H,
+        'failed_runs': failed_runs if failed_runs is not None else [],
+        'failed_run_metadata': failed_run_metadata if failed_run_metadata is not None else {},
     }
 
     # Save single file with descriptive prefix
@@ -1207,6 +1288,8 @@ def opt_fid_state(
     perturbation_method: str = 'schmidt', # Perturbation method: 'schmidt' or 'unitary'
     gradient_method: str = 'ols', # Gradient estimation method: 'ols' or 'max_welfare'
     track_fidelity: bool = False, # Whether to track state fidelity (expensive for large systems)
+    compute_distance_to_ghz: bool = True, # Whether to compute distance to GHZ orbit periodically
+    compute_distance_to_ghz_interval: int = 10, # Compute distance every N steps (default: 10)
     use_wandb: bool = False, # Whether to use wandb logging
     wandb_project: str = "nash-equilibrium", # W&B project name
     wandb_config: dict = None, # Additional wandb config
@@ -1261,6 +1344,8 @@ def opt_fid_state(
                 'real_strategies': real_strategies,
                 'perturbation_method': perturbation_method,
                 'gradient_method': gradient_method,
+                'compute_distance_to_ghz': compute_distance_to_ghz,
+                'compute_distance_to_ghz_interval': compute_distance_to_ghz_interval,
                 'chi': Psi[0].shape[1],  # Bond dimension
                 'L': len(Psi),  # Number of players
             }
@@ -1279,8 +1364,25 @@ def opt_fid_state(
     max_failures_before_abort = 20  # Maximum number of retries (more gradual LR increases)
     current_working_lr = subroutine_lr  # Track the current effective LR (adapts over time)
 
+    # Track all failed Nash equilibrium attempts for debugging
+    failed_runs = []
+    failed_run_metadata = {
+        'subroutine_max_iter': subroutine_max_iter,
+        'max_failures_before_abort': max_failures_before_abort,
+        'expl_check_interval': expl_check_interval,
+        'expl_threshold': expl_threshold,
+        'expl_maxiter': expl_maxiter,
+        'real_strategies': real_strategies,
+        'max_subroutine_lr': max_subroutine_lr,
+        'min_subroutine_lr': min_subroutine_lr,
+    }
+
     # Initialize: find the Nash equilibrium of the fiducial state
     Psi = to_canonical_form(Psi, form='B')
+
+    # CRITICAL: Save state BEFORE calling NE finder (it mutates Psi in-place)
+    Psi_initial = copy.deepcopy(Psi)
+
     baseline_result, baseline_success, final_alpha = find_nash_eq1_with_retry(
         Psi, H,
         max_iter=subroutine_max_iter,
@@ -1296,6 +1398,14 @@ def opt_fid_state(
     )
     if not baseline_success:
         print(f"Warning: Initial baseline NE not found after {max_failures_before_abort} retries, proceeding with non-NE state")
+        # Log failed run (using pre-attempt state)
+        failed_runs.append({
+            'iteration': -1,  # Before optimization loop
+            'stage': 'initial_baseline',
+            'state': Psi_initial,  # Use saved state from BEFORE attempt
+            'base_alpha': current_working_lr,
+            'attempted_alpha_range': (current_working_lr, max_subroutine_lr),
+        })
     else:
         # Update working LR to the successful value (whether higher or lower)
         if final_alpha != current_working_lr:
@@ -1333,6 +1443,9 @@ def opt_fid_state(
         for j in range(num_perturbations):
             Psi_ = [psi[j] for psi in Psi_batch]
 
+            # CRITICAL: Save state BEFORE calling NE finder (it mutates Psi_ in-place)
+            Psi_before_attempt = copy.deepcopy(Psi_)
+
             result_, success, final_alpha = find_nash_eq1_with_retry(
                 Psi_, H,
                 max_iter=subroutine_max_iter,
@@ -1359,62 +1472,23 @@ def opt_fid_state(
                 valid_param_diffs.append(all_param_diffs[j])  # Only include successful perturbations
             else:
                 print(f"Perturbation {j+1}/{num_perturbations}: Failed after {max_failures_before_abort} retries, skipping...")
+                # Log failed perturbation (using pre-attempt state)
+                failed_runs.append({
+                    'iteration': i,
+                    'stage': 'perturbation',
+                    'perturbation_index': j,
+                    'state': Psi_before_attempt,  # Use saved state from BEFORE attempt
+                    'base_alpha': current_working_lr,
+                    'attempted_alpha_range': (current_working_lr, max_subroutine_lr),
+                })
 
         # Check if entire batch failed
         if len(energy_diffs) == 0:
             print(f"No Nash equilibrium found for any of the {num_perturbations} perturbations after retries. "
-                  f"Capturing problematic run and aborting optimization.")
+                  f"Aborting optimization at iteration {i}.")
 
-            # Run with full history to capture the problematic case
-            problematic_result = find_nash_eq1(
-                Psi, H,
-                max_iter=subroutine_max_iter,
-                alpha=subroutine_lr,
-                expl_check_interval=expl_check_interval,
-                expl_maxiter=expl_maxiter,
-                real_strategies=real_strategies,
-                return_history=True
-            )
-
-            # Save the problematic run to a special directory
-            failed_runs_dir = os.path.join(save_dir, "failed_runs")
-            os.makedirs(failed_runs_dir, exist_ok=True)
-
-            from datetime import datetime
-            failed_run_uuid = str(uuid.uuid4())
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"failed_run_{timestamp}_{failed_run_uuid}.pkl"
-            filepath = os.path.join(failed_runs_dir, filename)
-
-            failed_run_data = {
-                'problematic_result': problematic_result,
-                'current_state': Psi,
-                'Hamiltonian': H,
-                'baseline_result': baseline_result,
-                'metric_logs_so_far': metric_logs,
-                'iteration': i,
-                'num_perturbations': num_perturbations,
-                'metadata': {
-                    'uuid': failed_run_uuid,
-                    'timestamp': timestamp,
-                    'chi': Psi[0].shape[1],
-                    'num_players': len(Psi),
-                    'max_num_steps': max_num_steps,
-                    'eps': eps,
-                    'num_perturbations': num_perturbations,
-                    'subroutine_max_iter': subroutine_max_iter,
-                    'subroutine_lr': subroutine_lr,
-                    'max_subroutine_lr': max_subroutine_lr,
-                    'perturbation_method': perturbation_method,
-                    'seed': seed,
-                }
-            }
-
-            with open(filepath, 'wb') as f:
-                pickle.dump(failed_run_data, f)
-
-            print(f"Problematic run saved to: {filepath}")
-            print(f"Failed run UUID: {failed_run_uuid}")
+            # Note: Individual failures already logged in failed_runs list above
+            # No need to save separate file - everything will be in main .pkl
 
             # Break out of the optimization loop
             break
@@ -1451,6 +1525,27 @@ def opt_fid_state(
         else:
             fidelity = None
 
+        # Compute distance to GHZ orbit periodically
+        distance_to_ghz = None
+        should_compute_distance = compute_distance_to_ghz and (i % compute_distance_to_ghz_interval == 0 or i == max_num_steps - 1)
+        if should_compute_distance:
+            try:
+                # Compute distance using current state (before finding Nash equilibrium)
+                distance_to_ghz = compute_distance_to_orbit(
+                    Psi,
+                    real_strategies=real_strategies,
+                    maxiter=300,  # Use smaller maxiter for speed (vs 2000 default)
+                    seed=seed if seed is not None else 42,
+                    dtype=np.complex128 if not np.isrealobj(Psi[0]) else np.float64
+                )
+                print(f"Step {i}: Distance to GHZ orbit = {distance_to_ghz:.6f}")
+            except Exception as e:
+                print(f"Warning: Failed to compute distance to GHZ orbit at step {i}: {e}")
+                distance_to_ghz = None
+
+        # CRITICAL: Save state BEFORE calling NE finder (it mutates Psi in-place)
+        Psi_before_baseline = copy.deepcopy(Psi)
+
         baseline_result, baseline_success, final_alpha = find_nash_eq1_with_retry(
             Psi, H,
             max_iter=subroutine_max_iter,
@@ -1467,6 +1562,14 @@ def opt_fid_state(
 
         if not baseline_success:
             print(f"Warning: No Nash Equilibrium found after {max_failures_before_abort} retries with max LR {max_subroutine_lr:.4f}, using non-NE state")
+            # Log failed run (using pre-attempt state)
+            failed_runs.append({
+                'iteration': i,
+                'stage': 'post_update_baseline',
+                'state': Psi_before_baseline,  # Use saved state from BEFORE attempt
+                'base_alpha': current_working_lr,
+                'attempted_alpha_range': (current_working_lr, max_subroutine_lr),
+            })
         else:
             # Update working LR to the successful value (whether higher or lower)
             if final_alpha != current_working_lr:
@@ -1492,6 +1595,7 @@ def opt_fid_state(
             'fidelity': fidelity,
             'grad_norm': grad_norm,
             'site': site,
+            'distance_to_ghz': distance_to_ghz,
         }
         metric_logs.append(metrics)
 
@@ -1519,6 +1623,8 @@ def opt_fid_state(
             }
             if track_fidelity:
                 wandb_metrics['fidelity'] = fidelity  # State update fidelity
+            if distance_to_ghz is not None:
+                wandb_metrics['distance_to_ghz'] = distance_to_ghz  # Distance to GHZ orbit
             if eps_schedule is not None:
                 wandb_metrics['eps_current'] = eps_current  # Scheduled perturbation size
 
@@ -1558,6 +1664,8 @@ def opt_fid_state(
             Psi=Psi,
             H=H,
             metric_logs=metric_logs,
+            failed_runs=failed_runs,
+            failed_run_metadata=failed_run_metadata,
             chi=Psi[0].shape[1],
             num_players=len(Psi),
             max_num_steps=max_num_steps,
@@ -1606,6 +1714,8 @@ def parse_args():
         'perturbation_method': 'unitary',
         'gradient_method': 'ols',
         'track_fidelity': False,
+        'compute_distance_to_ghz': True,
+        'compute_distance_to_ghz_interval': 10,
 
         # Nash equilibrium subroutine
         'subroutine_max_iter': 1000,
@@ -1671,6 +1781,17 @@ def parse_args():
     parser.add_argument('--track-fidelity', action='store_true', default=DEFAULTS['track_fidelity'],
                         help='Track state fidelity during optimization (expensive)')
 
+    # Distance to GHZ orbit computation
+    parser.add_argument('--compute-distance-to-ghz', action='store_true',
+                        default=DEFAULTS['compute_distance_to_ghz'],
+                        help='Compute distance to GHZ orbit during optimization')
+    parser.add_argument('--no-compute-distance-to-ghz', dest='compute_distance_to_ghz',
+                        action='store_false',
+                        help='Disable distance to GHZ computation')
+    parser.add_argument('--compute-distance-to-ghz-interval', type=int,
+                        default=DEFAULTS['compute_distance_to_ghz_interval'],
+                        help='Compute distance to GHZ every N steps (default: 10)')
+
     # Nash equilibrium subroutine parameters
     parser.add_argument('--subroutine-max-iter', type=int, default=DEFAULTS['subroutine_max_iter'],
                         help='Max iterations for Nash equilibrium finder')
@@ -1719,9 +1840,9 @@ def main():
         np.random.seed(args.seed)
 
     if args.dtype == 'real':
-        dtype = np.float32
+        dtype = np.float64
     elif args.dtype == 'complex':
-        dtype = np.complex64
+        dtype = np.complex128
     else:
         raise ValueError(f"Unknown dtype: {args.dtype}")
 
@@ -1791,6 +1912,8 @@ def main():
         perturbation_method=args.perturbation_method,
         gradient_method=args.gradient_method,
         track_fidelity=args.track_fidelity,
+        compute_distance_to_ghz=args.compute_distance_to_ghz,
+        compute_distance_to_ghz_interval=args.compute_distance_to_ghz_interval,
         use_wandb=args.use_wandb,
         wandb_project=args.wandb_project,
         wandb_config=wandb_config,

@@ -13,7 +13,7 @@ H_QPD = np.stack([
 ])
 
 
-def _get_rand_normalized_herm_matrix(d: int, dtype: np.dtype = np.float32):
+def _get_rand_normalized_herm_matrix(d: int, dtype: np.dtype = np.float64):
     """Generate a random normalized Hermitian matrix.
 
     Args:
@@ -37,7 +37,7 @@ def _get_rand_normalized_herm_matrix(d: int, dtype: np.dtype = np.float32):
     return rand_herm_matrix
 
 
-def get_perturbed_H_QPD(eps: float = 0.2, dtype: np.dtype = np.float32, seed: int = None):
+def get_perturbed_H_QPD(eps: float = 0.2, dtype: np.dtype = np.float64, seed: int = None):
     """Get perturbed quantum Prisoner's Dilemma Hamiltonian.
 
     Args:
@@ -59,7 +59,7 @@ def canonical_qpd(L: int = 3):
     game.add_edges_from([(i, i+1) for i in range(L-1)] + [(L-1, 0)])
     return game
 
-def get_hamiltonian(L: int, H: Complex[np.ndarray, "player cl cr"], edge: tuple[int, int], site: int, dtype: np.dtype = np.complex64) -> Complex[np.ndarray, "player Cl Cr"]:
+def get_hamiltonian(L: int, H: Complex[np.ndarray, "player cl cr"], edge: tuple[int, int], site: int, dtype: np.dtype = np.complex128) -> Complex[np.ndarray, "player Cl Cr"]:
     """
     Get the Hamiltonian for a given set of sites.
     """
@@ -69,7 +69,7 @@ def get_hamiltonian(L: int, H: Complex[np.ndarray, "player cl cr"], edge: tuple[
     H_mpo = np.moveaxis(H_mpo, [-2, -1], [L+edge[0], L+edge[1]])
     return H_mpo
 
-def get_hloc_from_graph(G: nx.DiGraph, H: Complex[np.ndarray, "player cl cr"], site: int, dtype: np.dtype = np.complex64, normalize: bool = True) -> Complex[np.ndarray, "player Cl Cr"]:
+def get_hloc_from_graph(G: nx.DiGraph, H: Complex[np.ndarray, "player cl cr"], site: int, dtype: np.dtype = np.complex128, normalize: bool = True) -> Complex[np.ndarray, "player Cl Cr"]:
     print(G.number_of_nodes())
     hloc = np.zeros([2] * (2 * G.number_of_nodes()), dtype=dtype)
     for edge in G.in_edges(site):
@@ -89,7 +89,7 @@ def get_hloc_from_graph(G: nx.DiGraph, H: Complex[np.ndarray, "player cl cr"], s
 # -------------------------------------------------------------------------------------------------
 # Particular game definitions for quantum prisoner's dilemma
 
-def get_default_3players(option: str = 'H', dtype: np.dtype = np.float32):
+def get_default_3players(option: str = 'H', dtype: np.dtype = np.float64):
     """
     Returns the default Hamiltonian for the 3-player quantum game (Prisoner's Dilemma variant).
 
@@ -120,7 +120,7 @@ def get_default_3players(option: str = 'H', dtype: np.dtype = np.float32):
     else:
         raise ValueError("Invalid option")
 
-def get_default_2players(option: str = 'H', dtype: np.dtype = np.float32):
+def get_default_2players(option: str = 'H', dtype: np.dtype = np.float64):
     """
     Returns the default Hamiltonian for the 2-player quantum game (Prisoner's Dilemma variant).
     """
@@ -136,7 +136,7 @@ def get_default_2players(option: str = 'H', dtype: np.dtype = np.float32):
     else:
         raise ValueError("Invalid option")
 
-def get_default_cyclic_players(L: int, Hs: list[np.ndarray] = H_QPD, option: str = 'H', dtype: np.dtype = np.float32):
+def get_default_cyclic_players(L: int, Hs: list[np.ndarray] = H_QPD, option: str = 'H', dtype: np.dtype = np.float64):
     """
     Returns the default Hamiltonian for L-player quantum game on a cyclic/ring graph.
 
@@ -205,7 +205,7 @@ def get_default_cyclic_players(L: int, Hs: list[np.ndarray] = H_QPD, option: str
         raise ValueError(f"Invalid option: {option}")
 
 
-def get_default_4players(option: str = 'H', dtype: np.dtype = np.float32):
+def get_default_4players(option: str = 'H', dtype: np.dtype = np.float64):
     """
     Backward compatibility wrapper for 4-player cyclic game.
 
@@ -223,7 +223,7 @@ def get_default_4players(option: str = 'H', dtype: np.dtype = np.float32):
     """
     return get_default_cyclic_players(L=4, option=option, dtype=dtype)
 
-def get_default_H(num_players: int = 3, option: str = 'H', dtype: np.dtype = np.float32):
+def get_default_H(num_players: int = 3, option: str = 'H', dtype: np.dtype = np.float64):
     """
     Returns the default Hamiltonian for num_players quantum game.
 

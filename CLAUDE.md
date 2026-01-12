@@ -43,6 +43,57 @@ pytest test_misc_torch.py -v -s
 python test_misc_torch.py
 ```
 
+## Breaking Changes (January 2026)
+
+### dtype Defaults Changed to Higher Precision
+
+**Change Summary:**
+- All state and Hamiltonian initialization functions now default to higher-precision dtypes
+- **Real dtypes:** `np.float32` → `np.float64`
+- **Complex dtypes:** `np.complex64` → `np.complex128`
+
+**Rationale:**
+- Fixes dtype mismatches between states (float32) and unitaries (float64) in exploitability calculations
+- Improves numerical precision for tight convergence thresholds (< 1e-5)
+- Eliminates ~10⁻⁴ precision errors in state distance computations
+
+**Migration Guide:**
+
+1. **No changes needed for most users** - new defaults apply automatically
+
+2. **If you need float32 for memory/speed** (e.g., large-scale runs):
+   ```python
+   Psi = get_rand_state_as_mps(L=3, dtype=np.float32)
+   H = get_default_3players(dtype=np.float32)
+   ```
+
+3. **Warnings:** If you use float32 states, you'll see warnings from `compute_exploitability()`:
+   ```
+   UserWarning: Input state dtype is float32, but recommended dtype is float64.
+   This may cause precision issues in exploitability calculation.
+   ```
+   To suppress: either upgrade to float64 or ignore the warning if expl_threshold ≥ 5e-4
+
+4. **Loading old data:** Pickled states remain loadable. They will retain their original dtype (float32).
+   Convert after loading if needed:
+   ```python
+   import pickle
+   with open('old_data.pkl', 'rb') as f:
+       old_Psi = pickle.load(f)
+   # Convert to new default:
+   Psi_new = [tensor.astype(np.float64) for tensor in old_Psi]
+   ```
+
+**Performance Impact:**
+- Memory usage: ~2× for states (float64 vs float32)
+- Computation time: Typically < 10% slower for most operations
+- Accuracy: Significantly improved for tight thresholds and state comparisons
+
+**When to use float32:**
+- Large bond dimensions (χ > 64) with memory constraints
+- Exploitability threshold ≥ 5e-4 (precision less critical)
+- Benchmarking speed rather than absolute accuracy
+
 ## Code Architecture
 
 ### Core Modules

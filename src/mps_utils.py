@@ -62,7 +62,7 @@ def test_canonical_form(Psi: List[np.ndarray], form: str = 'A', atol: float = 1e
     return True
 
 def get_rand_state_as_mps(L: int = 3, max_bond_dim: int | None = None, seed: int | None = None,
-                          cutoff: float = 1e-16, canonicalize: bool = True, dtype: np.dtype = np.float32):
+                          cutoff: float = 1e-16, canonicalize: bool = True, dtype: np.dtype = np.float64):
     """
     Generate random state as MPS with specified bond dimension.
 
@@ -89,7 +89,7 @@ def get_rand_state_as_mps(L: int = 3, max_bond_dim: int | None = None, seed: int
 
 
 def get_rand_mps(L: int = 3, chi: int = 4, d_phys: int = 2, seed: int | None = None,
-                 dtype: np.dtype = np.float32, form: str = 'A', canonicalize: bool = True):
+                 dtype: np.dtype = np.float64, form: str = 'A', canonicalize: bool = True):
     """
     Generate random MPS with specified bond dimension.
 
@@ -238,7 +238,7 @@ def from_comp_basis(state_vector, L=None, max_bond_dim=None, cutoff=1e-16):
 
 
 def get_product_state(L: int = 3, state_per_site: List[int] | None = None,
-                      dtype: np.dtype = np.float32):
+                      dtype: np.dtype = np.float64):
     """
     Create a product state in MPS form with OBC (Open Boundary Conditions).
 
@@ -270,7 +270,7 @@ def get_product_state(L: int = 3, state_per_site: List[int] | None = None,
     return Psi
 
 
-def get_ghz_state(L: int = 3, dtype: np.dtype = np.float32):
+def get_ghz_state(L: int = 3, dtype: np.dtype = np.float64):
     """
     Create a GHZ state in MPS form with OBC: |GHZ⟩ = (|00...0⟩ + |11...1⟩)/√2
 
@@ -324,7 +324,7 @@ def apply_random_unitaries(state,
                            epsilon: float = 0.1,
                            sites: List[int] | None = None,
                            seed: int | None = None,
-                           dtype: np.dtype = np.float32,
+                           dtype: np.dtype = np.float64,
                            symmetric: bool = False):
     """
     Apply random single-qubit unitaries to a quantum state.
@@ -424,7 +424,7 @@ def apply_random_unitaries(state,
         return psi_tensor.reshape(-1)
 
 
-def get_random_near_id_unitary(eps: float = 5e-2, dtype: np.dtype = np.float32):
+def get_random_near_id_unitary(eps: float = 5e-2, dtype: np.dtype = np.float64):
     """
     Generates a unitary matrix close to identity.
 

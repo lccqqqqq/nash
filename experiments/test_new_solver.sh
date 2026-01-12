@@ -14,6 +14,7 @@ MIN_ALPHA=${5:-0.01}  # Min LR for adaptive retry (should be < ALPHA)
 NUM_JOBS_PER_CONFIG=${6:-20}
 
 EXPL_THRESHOLD=${7:-1e-7}
+EXPERIMENT_NAME=${8:-"newdtype-explmaxiter200"}
 
 # CHI values to test (smaller set for testing new features)
 CHIS=(2 4 6 8 16)
@@ -29,10 +30,10 @@ CONFIGS=(
 # Queue settings
 QUEUE="long"
 NCORES=1  # Number of cores per job
-MEM_PER_CORE=1  # GB per core
+MEM_PER_CORE=1.8  # GB per core
 
 # Base save directory (new directory for testing new features)
-BASE_SAVE_DIR="data/qpd6_new_solver_test_adaptiveLR"
+BASE_SAVE_DIR="data/qpd6_new_solver_test_${EXPERIMENT_NAME}"
 
 echo "======================================================================"
 echo "Testing New Solver Features: Gradient Methods + Ridge + Eps Scheduling"
@@ -84,7 +85,7 @@ for CHI in "${CHIS[@]}"; do
             SEED=$((1000001 * CHI + CONFIG_INDEX * 10000 + i))
 
             JOB_OUTPUT=$(addqueue -q $QUEUE -n $NCORES -m $MEM_PER_CORE \
-                -o output/qpd_new_solver_test_adaptiveLR/%j_chi${CHI}_${CONFIG_DESC}_job${i}.out \
+                -o output/qpd_new_solver_test_${EXPERIMENT_NAME}/%j_chi${CHI}_${CONFIG_DESC}_job${i}.out \
                 -c solver_test \
                 /usr/bin/python3 src/solver.py \
                 --non-commutative-norm $NON_COMMUTATIVE_NORM \
@@ -104,12 +105,13 @@ for CHI in "${CHIS[@]}"; do
                 --max-subroutine-lr $MAX_ALPHA \
                 --min-subroutine-lr $MIN_ALPHA \
                 --expl-check-interval 50 \
-                --expl-maxiter 80 \
+                --expl-maxiter 200 \
                 --expl-threshold $EXPL_THRESHOLD \
                 --wandb-project quantum-nash-new-solver \
-                --wandb-experiment adaptiveLR \
+                --wandb-experiment $EXPERIMENT_NAME \
                 --save-dir $SAVE_DIR \
                 --real-strategies \
+                --no-compute-distance-to-ghz \
                 2>&1)
 
             # Extract job ID

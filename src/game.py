@@ -248,3 +248,80 @@ def get_default_H(num_players: int = 3, option: str = 'H', dtype: np.dtype = np.
         return get_default_cyclic_players(L=num_players, option=option, dtype=dtype)
     else:
         raise ValueError(f"Invalid number of players: {num_players}. Must be >= 2")
+
+
+def get_fixed_perturbation_hamiltonian_2player(
+    lambda_noncomm: float,
+    perturbation_seed: int,
+    dtype: np.dtype = np.float64,
+    cache: dict | None = None
+) -> list[np.ndarray]:
+    """
+    Generate H = h0 + λ·V with fixed V for a given seed (2-player cyclic).
+
+    This function allows systematic study of non-commutativity effects by:
+    1. Generating a fixed random perturbation V once per seed
+    2. Scaling it by λ to control perturbation strength
+    3. Adding to base 2-player cyclic Hamiltonian
+
+    The cache parameter allows reusing the same V across multiple λ values,
+    ensuring that only the perturbation strength varies (not the direction).
+
+    Args:
+        lambda_noncomm: Non-commutativity strength λ
+                       λ = 0: Pure QPD (diagonal, commutative)
+                       λ > 0: Increasing non-commutativity
+        perturbation_seed: Random seed for generating V
+                          Same seed → same perturbation direction
+        dtype: Data type for arrays (np.float64 or np.complex128)
+        cache: Optional dict to cache V matrices
+              Key format: (perturbation_seed, dtype)
+              If provided, V is computed once and reused
+
+    Returns:
+        List[np.ndarray]: Perturbed Hamiltonian [H_player1, H_player2]
+                         Each has shape (2,2,2,2) for 2-player game
+
+    Example:
+        # Study same perturbation direction at different strengths
+        cache = {}
+        H_weak = get_fixed_perturbation_hamiltonian_2player(0.05, seed=1000, cache=cache)
+        H_strong = get_fixed_perturbation_hamiltonian_2player(0.20, seed=1000, cache=cache)
+        # Both use the same V, different λ
+
+        # Different perturbation directions
+        H_dir1 = get_fixed_perturbation_hamiltonian_2player(0.1, seed=1000)
+        H_dir2 = get_fixed_perturbation_hamiltonian_2player(0.1, seed=2000)
+        # Same λ, different V
+    """
+    # Get base Hamiltonian (2-player cyclic)
+    h0 = get_default_cyclic_players(L=2, option='H', dtype=dtype)
+
+    # Check cache for perturbation matrix V
+    cache_key = (perturbation_seed, str(dtype))
+    if cache is not None and cache_key in cache:
+        V = cache[cache_key]
+    else:
+        # Generate perturbation V for this seed
+        np.random.seed(perturbation_seed)
+
+        # Generate normalized perturbation for each player
+        # h0[i] has shape (2,2,2,2) - flattened dimension is 16
+        V = []
+        for i in range(2):  # 2 players
+            # Generate random Hermitian matrix
+            d = h0[i].size  # Total number of elements (16 for 2-player)
+            V_player = _get_rand_normalized_herm_matrix(d=int(np.sqrt(d)), dtype=dtype)
+
+            # Reshape to match Hamiltonian shape
+            V_player = V_player.reshape(h0[i].shape)
+            V.append(V_player)
+
+        # Store in cache if provided
+        if cache is not None:
+            cache[cache_key] = V
+
+    # Return H = h0 + λ·V
+    H_perturbed = [h0[i] + lambda_noncomm * V[i] for i in range(2)]
+
+    return H_perturbed

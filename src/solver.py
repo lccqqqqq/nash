@@ -814,7 +814,7 @@ def update_state(Psi, S_grad_est_proj, lr, site):
     return Psi_out
 
 
-def update_state_unitary(Psi, coef_grad_est, lr, site, max_grad_norm=1.0):
+def update_state_unitary(Psi, coef_grad_est, lr, site, max_grad_norm=1.0, verbose=True):
     """
     Apply targeted unitary update to the state using Pauli coefficient gradients.
 
@@ -872,7 +872,7 @@ def update_state_unitary(Psi, coef_grad_est, lr, site, max_grad_norm=1.0):
     if grad_norm > max_grad_norm:
         # Clip gradient while preserving direction
         coef_update = coef_grad_est * (max_grad_norm / grad_norm)
-        if grad_norm > max_grad_norm * 2:  # Only print if significantly clipped
+        if grad_norm > max_grad_norm * 2 and verbose:  # Only print if significantly clipped
             print(f"  Clipping gradient: {grad_norm:.4f} → {max_grad_norm:.4f}")
     else:
         # Use gradient as-is
@@ -1699,7 +1699,9 @@ def parse_args():
         'chi': 4,
         'num_players': 3,
         'seed': None,
+        'hamiltonian_seed': None,
         'dtype': 'real',
+        'init_state': 'product',  # 'random', 'product', 'ghz'
 
         # Optimization parameters
         'max_num_steps': 1000,
@@ -1750,7 +1752,12 @@ def parse_args():
     parser.add_argument('--num-players', type=int, default=DEFAULTS['num_players'],
                         help='Number of players (L)')
     parser.add_argument('--seed', type=int, default=DEFAULTS['seed'],
-                        help='Random seed for reproducibility')
+                        help='Random seed for state initialization')
+    parser.add_argument('--init-state', type=str, default=DEFAULTS['init_state'],
+                        choices=['random', 'product', 'ghz'],
+                        help='Initial state type: random (Haar random), product (|000...⟩), or ghz')
+    parser.add_argument('--hamiltonian-seed', type=int, default=DEFAULTS['hamiltonian_seed'],
+                        help='Random seed for Hamiltonian perturbation (independent from state seed)')
 
     # Optimization parameters
     parser.add_argument('--max-num-steps', type=int, default=DEFAULTS['max_num_steps'],
@@ -1847,16 +1854,27 @@ def main():
         raise ValueError(f"Unknown dtype: {args.dtype}")
 
     # Initialize state and Hamiltonian
-    print(f"Initializing random MPS with L={args.num_players}, chi={args.chi}")
+    print(f"Initializing {args.init_state} state with L={args.num_players}, chi={args.chi}")
     # Note: Uses global random state set above (no need to pass seed again)
-    Psi = get_rand_state_as_mps(L=args.num_players, max_bond_dim=args.chi, dtype=dtype)
+    if args.init_state == 'random':
+        Psi = get_rand_state_as_mps(L=args.num_players, max_bond_dim=args.chi, dtype=dtype)
+    elif args.init_state == 'product':
+        Psi = get_product_state(L=args.num_players, state_per_site=[1] * args.num_players, dtype=dtype)
+    elif args.init_state == 'ghz':
+        Psi = get_ghz_state(L=args.num_players, dtype=dtype)
+    else:
+        raise ValueError(f"Unknown init_state: {args.init_state}")
 
     if args.non_commutative_norm > 0:
         print(f"CRITICAL: In this run, implement non-commutative payoff")
         print(f"  Non-commutative norm: {args.non_commutative_norm}")
         print(f"  Seed: {args.seed}")
 
-    Hs = get_perturbed_H_QPD(eps=args.non_commutative_norm, dtype=dtype)
+    Hs = get_perturbed_H_QPD(
+        eps=args.non_commutative_norm,
+        dtype=dtype,
+        seed=args.hamiltonian_seed
+    )
     print(f"  2-Body Interaction Hamiltonians Used: {Hs}")
     H = get_default_cyclic_players(L=args.num_players, Hs=Hs, dtype=dtype)
 
@@ -1865,7 +1883,9 @@ def main():
         'experiment': args.wandb_experiment,
         'chi': args.chi,
         'seed': args.seed,
+        'hamiltonian_seed': args.hamiltonian_seed,
         'dtype': dtype,
+        'init_state': args.init_state,
     }
 
     print(f"Starting optimization:")

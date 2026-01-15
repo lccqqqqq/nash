@@ -1,6 +1,6 @@
 #!/bin/bash -l
 echo =========================================================   
-echo Job submitted  date = Mon 12 Jan 15:38:42 GMT 2026      
+echo Job submitted  date = Tue 13 Jan 14:42:38 GMT 2026      
 date_start=`date +%s`
 echo $SLURM_JOB_NUM_NODES nodes \( $SLURM_CPUS_ON_NODE processes per node \)        
 echo $SLURM_JOB_NUM_NODES hosts used: $SLURM_JOB_NODELIST      
@@ -15,7 +15,7 @@ echo
 ulimit -l unlimited
 
 export OMP_NUM_THEADS=1
- /usr/local/shared/slurm/bin/srun -u -n 1 --mpi=pmix --mem-per-cpu=1843 nice -n 10 /usr/bin/python3 src/solver.py --non-commutative-norm 0 --seed 16030036 --chi 16 --num-players 6 --dtype real --max-num-steps 1000 --eps 0.02 --eps-schedule cosine --num-perturbations 20 --perturbation-method unitary --gradient-method ols --ridge-lam 0.01 --subroutine-max-iter 1000 --subroutine-lr 0.02 --max-subroutine-lr 0.8 --min-subroutine-lr 0.01 --expl-check-interval 50 --expl-maxiter 200 --expl-threshold 1e-7 --wandb-project quantum-nash-new-solver --wandb-experiment newdtype-explmaxiter200 --save-dir data/qpd6_new_solver_test_newdtype-explmaxiter200/chi_16/ols_ridge0.01 --real-strategies --no-compute-distance-to-ghz
+ /usr/local/shared/slurm/bin/srun -u -n 1 --mpi=pmix --mem-per-cpu=1024 nice -n 10 /usr/bin/python3 src/solver.py --non-commutative-norm 0.2 --seed 42 --hamiltonian-seed 4002 --chi 8 --num-players 3 --init-state product --dtype complex --max-num-steps 1000 --eps 0.01 --eps-schedule cosine --num-perturbations 20 --perturbation-method unitary --subroutine-max-iter 1000 --subroutine-lr 0.015 --max-subroutine-lr 0.6 --min-subroutine-lr 0.009 --expl-check-interval 60 --expl-maxiter 50 --expl-threshold 1e-6 --wandb-project quantum-nash-1 --save-dir data/tests --wandb-experiment opt-fid-state-prod-init --no-real-strategies --compute-distance-to-ghz
   echo ---------------                                           
   echo Job output ends                                           
 

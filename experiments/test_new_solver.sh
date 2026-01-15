@@ -92,6 +92,7 @@ for CHI in "${CHIS[@]}"; do
                 --seed $SEED \
                 --chi $CHI \
                 --num-players $NUM_PLAYERS \
+                --init-state product \
                 --dtype real \
                 --max-num-steps 1000 \
                 --eps 0.02 \

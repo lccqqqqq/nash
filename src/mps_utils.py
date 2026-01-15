@@ -320,6 +320,99 @@ def get_ghz_state(L: int = 3, dtype: np.dtype = np.float64):
     return Psi
 
 
+def get_low_entanglement_2qubit_state(
+    lambda1: float,
+    randomize_basis: bool = True,
+    seed: int | None = None,
+    dtype: np.dtype = np.float64
+) -> list[np.ndarray]:
+    """
+    Create 2-qubit state with specified Schmidt eigenvalue.
+
+    The state is created in Schmidt form: |ψ⟩ = λ₁|00⟩ + λ₂|11⟩
+    where λ₂ = √(1 - λ₁²), and then optionally rotated by random local unitaries.
+
+    Args:
+        lambda1: Larger Schmidt eigenvalue (λ₁ ∈ [1/√2, 1])
+                λ₁ = 1: product state (no entanglement)
+                λ₁ = 1/√2 ≈ 0.707: maximally entangled (Bell state)
+        randomize_basis: If True, apply random local SU(2) unitaries to each qubit
+        seed: Random seed for reproducibility
+        dtype: NumPy data type (default: np.float64)
+
+    Returns:
+        List[np.ndarray]: MPS representation of the 2-qubit state
+
+    Example:
+        # Create product state (no entanglement)
+        Psi_product = get_low_entanglement_2qubit_state(lambda1=1.0, randomize_basis=False)
+
+        # Create low-entanglement state with random basis
+        Psi_low_ent = get_low_entanglement_2qubit_state(lambda1=0.95, seed=42)
+    """
+    if seed is not None:
+        np.random.seed(seed)
+
+    # Validate lambda1
+    min_lambda = 1.0 / np.sqrt(2.0)
+    if not (min_lambda - 1e-10 <= lambda1 <= 1.0 + 1e-10):
+        raise ValueError(f"lambda1 must be in [{min_lambda:.6f}, 1.0], got {lambda1}")
+
+    # Compute lambda2 from normalization
+    lambda2 = np.sqrt(1.0 - lambda1**2)
+
+    # Create state in computational basis: |ψ⟩ = λ₁|00⟩ + λ₂|11⟩
+    psi = np.zeros(4, dtype=dtype)
+    psi[0] = lambda1  # |00⟩
+    psi[3] = lambda2  # |11⟩
+
+    # Optionally apply random local unitaries
+    if randomize_basis:
+        # Generate random SU(2) unitaries for each qubit
+        def random_su2(dtype):
+            """Generate random SU(2) unitary using Haar measure."""
+            # Use parameterization: U = exp(i * (α σ_x + β σ_y + γ σ_z))
+            # Sample uniformly on sphere for axis, uniform angle
+            if np.issubdtype(dtype, np.complexfloating):
+                # Complex case: full SU(2)
+                alpha, beta, gamma = np.random.randn(3)
+                norm = np.sqrt(alpha**2 + beta**2 + gamma**2)
+                if norm < 1e-10:
+                    return np.eye(2, dtype=dtype)
+                alpha, beta, gamma = alpha/norm, beta/norm, gamma/norm
+
+                theta = np.random.uniform(0, 2*np.pi)
+                cos_t = np.cos(theta/2)
+                sin_t = np.sin(theta/2)
+
+                U = np.array([
+                    [cos_t - 1j*gamma*sin_t, (-1j*alpha - beta)*sin_t],
+                    [(-1j*alpha + beta)*sin_t, cos_t + 1j*gamma*sin_t]
+                ], dtype=dtype)
+            else:
+                # Real case: use exp(iY) which gives real matrices
+                # Random rotation in SO(2) subgroup
+                theta = np.random.uniform(0, 2*np.pi)
+                U = np.array([
+                    [np.cos(theta), np.sin(theta)],
+                    [-np.sin(theta), np.cos(theta)]
+                ], dtype=dtype)
+
+            return U
+
+        U1 = random_su2(dtype)
+        U2 = random_su2(dtype)
+
+        # Apply unitaries: (U1 ⊗ U2) |ψ⟩
+        U_total = np.kron(U1, U2)
+        psi = U_total @ psi
+
+    # Convert to MPS format
+    Psi = from_comp_basis(psi, L=2)
+
+    return Psi
+
+
 def apply_random_unitaries(state,
                            epsilon: float = 0.1,
                            sites: List[int] | None = None,

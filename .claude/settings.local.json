@@ -1,27 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cat:*)",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
       "Bash(python3:*)",
-      "Bash(python test_solver_4qubit.py:*)",
-      "Bash(python:*)",
-      "Bash(grep:*)",
-      "Bash(ls:*)",
-      "Bash(find:*)",
-      "Bash(xargs -I {} bash -c 'echo \"\"\"\"=== {} ===\"\"\"\" && grep \"\"\"\"^def \"\"\"\" {}')",
-      "Bash(mkdir:*)",
-      "Bash(tree:*)",
-      "Bash(xargs:*)",
-      "Bash(source:*)",
-      "Bash(pip install:*)",
-      "WebFetch(domain:github.com)",
-      "Bash(showq:*)",
-      "Bash(bash:*)",
-      "Bash(for i in {1..12})",
-      "Bash(do sleep 3)",
-      "Bash(if ls -t python3-*.out)"
+      "Bash(source .venv/bin/activate:*)"
     ],
     "deny": [],
     "ask": []

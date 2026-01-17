@@ -264,4 +264,17 @@ for i, j in tqdm(itertools.product(range(len(unitaries)), range(len(unitaries)))
 
 np.save('expl_landscape.npy', np.array(expls))
 
-    
+#%% Plot the exploitability landscape
+plt.figure(figsize=(10, 6))
+plt.scatter(range(len(expls)), expls, marker='.', s=1)
+plt.xlabel('Unitaries')
+plt.ylabel('Exploitability')
+plt.title('Exploitability Landscape')
+
+
+min_expl = np.min(expls)
+min_expl_idx = np.argmin(expls)
+plt.axhline(y=min_expl, color='red', linestyle='--')
+print(f"Minimum exploitability: {min_expl}")
+print(f"Minimum exploitability index: {min_expl_idx}")
+plt.show()

@@ -558,3 +558,128 @@ def apply_unitary(unitary: np.ndarray, A: np.ndarray) -> np.ndarray:
         A, unitary, "phys chi_l chi_r, new_phys phys -> new_phys chi_l chi_r"
     )
     return A
+
+
+def apply_two_qubit_gate(
+    Psi: List[np.ndarray],
+    unitary: np.ndarray,
+    site: int,
+    truncate: bool = False,
+    max_bond_dim: int | None = None,
+    cutoff: float = 1e-16
+) -> List[np.ndarray]:
+    """
+    Apply a two-qubit gate to adjacent sites in an MPS.
+
+    The gate is applied by contracting the two MPS tensors, applying the unitary,
+    and then performing SVD to split them back. This can increase the bond dimension.
+
+    Args:
+        Psi: MPS as list of tensors with shape (d_phys, chi_l, chi_r)
+        unitary: Two-qubit unitary gate in either format:
+                 - (4, 4) matrix acting on basis |00⟩, |01⟩, |10⟩, |11⟩
+                 - (2, 2, 2, 2) tensor with indices (out_1, out_2, in_1, in_2)
+                 Format is auto-detected based on shape.
+        site: Index of first site (gate acts on sites i and i+1)
+        truncate: Whether to truncate bond dimension after gate application (default: False)
+        max_bond_dim: Maximum bond dimension to keep (only used if truncate=True)
+        cutoff: SVD truncation threshold for singular values (default: 1e-16)
+
+    Returns:
+        List[np.ndarray]: New MPS with gate applied to sites [site, site+1]
+
+    Example:
+        # Apply CNOT gate (control=site 0, target=site 1)
+        CNOT = np.array([[1,0,0,0], [0,1,0,0], [0,0,0,1], [0,0,1,0]], dtype=np.float64)
+        Psi_new = apply_two_qubit_gate(Psi, CNOT, site=0)
+
+        # Apply with truncation to chi=4
+        Psi_new = apply_two_qubit_gate(Psi, CNOT, site=1, truncate=True, max_bond_dim=4)
+    """
+    n_sites = len(Psi)
+
+    # Validate site index
+    if site < 0 or site >= n_sites - 1:
+        raise ValueError(f"site must be in [0, {n_sites-2}] for two-qubit gate, got {site}")
+
+    # Detect and convert unitary format
+    if unitary.shape == (4, 4):
+        # Convert 4×4 matrix to (2,2,2,2) tensor
+        # Basis ordering: |00⟩, |01⟩, |10⟩, |11⟩ -> indices (i1*2 + i2)
+        U_tensor = unitary.reshape(2, 2, 2, 2)
+        # Transpose to (out_i, out_ip1, in_i, in_ip1)
+        U_tensor = np.transpose(U_tensor, (0, 2, 1, 3))
+    elif unitary.shape == (2, 2, 2, 2):
+        U_tensor = unitary
+    else:
+        raise ValueError(f"Unitary must be shape (4,4) or (2,2,2,2), got {unitary.shape}")
+
+    # Create copy of MPS
+    Psi_new = [psi.copy() for psi in Psi]
+
+    # Get tensors at sites i and i+1
+    A_i = Psi_new[site]      # (d_phys, chi_l, chi_m)
+    A_ip1 = Psi_new[site+1]  # (d_phys, chi_m, chi_r)
+
+    chi_l = A_i.shape[1]
+    chi_r = A_ip1.shape[2]
+
+    # Contract to form theta tensor: (phys_i, phys_ip1, chi_l, chi_r)
+    theta = einops.einsum(
+        A_i, A_ip1,
+        "phys_i chi_l chi_m, phys_ip1 chi_m chi_r -> phys_i phys_ip1 chi_l chi_r"
+    )
+
+    # Apply two-qubit unitary
+    theta_new = einops.einsum(
+        U_tensor, theta,
+        "out_i out_ip1 in_i in_ip1, in_i in_ip1 chi_l chi_r -> out_i out_ip1 chi_l chi_r"
+    )
+
+    # Reshape for SVD: group (phys_i, chi_l) as rows, (phys_ip1, chi_r) as columns
+    theta_matrix = einops.rearrange(
+        theta_new,
+        "phys_i phys_ip1 chi_l chi_r -> (phys_i chi_l) (phys_ip1 chi_r)"
+    )
+
+    # Perform SVD
+    U, S, Vh = np.linalg.svd(theta_matrix, full_matrices=False)
+
+    # Apply truncation if requested
+    if truncate:
+        # Determine number of singular values to keep
+        keep_indices = S > cutoff
+        if max_bond_dim is not None:
+            keep_count = min(np.sum(keep_indices), max_bond_dim)
+        else:
+            keep_count = np.sum(keep_indices)
+
+        # Ensure we keep at least one singular value
+        keep_count = max(keep_count, 1)
+
+        U = U[:, :keep_count]
+        S = S[:keep_count]
+        Vh = Vh[:keep_count, :]
+
+    chi_new = len(S)
+
+    # Reshape U back to MPS tensor at site i: (phys_i, chi_l, chi_new)
+    A_i_new = einops.rearrange(
+        U,
+        "(phys_i chi_l) chi_new -> phys_i chi_l chi_new",
+        phys_i=2, chi_l=chi_l
+    )
+
+    # Absorb singular values into right tensor and reshape to MPS tensor at site i+1
+    SVh = np.diag(S) @ Vh
+    A_ip1_new = einops.rearrange(
+        SVh,
+        "chi_new (phys_ip1 chi_r) -> phys_ip1 chi_new chi_r",
+        phys_ip1=2, chi_r=chi_r
+    )
+
+    # Update tensors in the new MPS
+    Psi_new[site] = A_i_new
+    Psi_new[site+1] = A_ip1_new
+
+    return Psi_new

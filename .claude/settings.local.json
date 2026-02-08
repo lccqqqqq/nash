@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(python3:*)",
-      "Bash(source .venv/bin/activate:*)"
+      "Bash(source .venv/bin/activate:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

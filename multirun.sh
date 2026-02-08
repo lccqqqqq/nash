@@ -1,6 +1,6 @@
 #!/bin/bash -l
 echo =========================================================   
-echo Job submitted  date = Tue 23 Dec 20:45:05 GMT 2025      
+echo Job submitted  date = Fri 23 Jan 01:07:25 GMT 2026      
 date_start=`date +%s`
 echo $SLURM_JOB_NUM_NODES nodes \( $SLURM_CPUS_ON_NODE processes per node \)        
 echo $SLURM_JOB_NUM_NODES hosts used: $SLURM_JOB_NODELIST      
@@ -15,7 +15,7 @@ echo
 ulimit -l unlimited
 
 export OMP_NUM_THEADS=1
- /usr/local/shared/slurm/bin/srun -u -n 5 --mpi=pmix --mem-per-cpu=1024 nice -n 10 /usr/local/shared/bin/multirun commands.txt
+ /usr/local/shared/slurm/bin/srun -u -n 800 --mpi=pmix --mem-per-cpu=1024 nice -n 10 /usr/local/shared/bin/multirun commands_12p.txt
   echo ---------------                                           
   echo Job output ends                                           
 

@@ -1,0 +1,158 @@
+\documentclass[12pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{physics}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{booktabs}
+
+\title{Area Laws in Quantum Nash Equilibria}
+\author{C. L}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Abstract here.
+\end{abstract}
+
+\section{Setup}
+\label{sec:setup}
+
+\subsection{Quantum game formulation}
+
+We consider an $L$-player quantum game where each player $i$ controls a single qubit.
+The joint state of all players is described by a quantum state $\ket{\psi} \in (\mathbb{C}^2)^{\otimes L}$.
+Each player's strategy consists of a single-qubit unitary $U_i \in \mathrm{SU}(2)$ applied to their qubit.
+Given a strategy profile $(U_1, \ldots, U_L)$ applied to a fiducial state $\ket{\psi_0}$, the resulting state is
+\begin{equation}
+    \ket{\psi} = (U_1 \otimes U_2 \otimes \cdots \otimes U_L) \ket{\psi_0}.
+\end{equation}
+
+The payoff for player $i$ is defined as the expectation value of a Hermitian operator $H_i$:
+\begin{equation}
+    \label{eq:payoff}
+    E_i = \bra{\psi} H_i \ket{\psi}.
+\end{equation}
+In the quantum Prisoner's Dilemma, the Hamiltonians $H_i$ are diagonal in the computational basis,
+\begin{equation}
+    H_i = \sum_{\mathbf{s} \in \{0,1\}^L} h_i(\mathbf{s}) \ketbra{\mathbf{s}}{\mathbf{s}},
+\end{equation}
+where $h_i(\mathbf{s})$ assigns a real-valued payoff to each measurement outcome $\mathbf{s} = (s_1, \ldots, s_L)$.
+
+\subsection{Payoff structure}
+
+For $L = 3$ players, the payoff values are given in Table~\ref{tab:payoffs}.
+The game is symmetric under cyclic permutation of the players:
+\begin{equation}
+    h_i(\mathbf{s}) = h_{i+1 \bmod 3}(\sigma(\mathbf{s})),
+\end{equation}
+where $\sigma$ denotes the corresponding cyclic permutation of the bit string.
+Mutual cooperation ($\mathbf{s} = 000$) yields a payoff of 6 per player,
+while mutual defection ($\mathbf{s} = 111$) yields only 2---the characteristic tension of the Prisoner's Dilemma.
+A single defector receives 10 while the remaining cooperators receive 3 or 0,
+creating an incentive to deviate from cooperation.
+
+\begin{table}[h]
+    \centering
+    \begin{tabular}{cccc}
+        \toprule
+        Outcome $\mathbf{s}$ & $h_1(\mathbf{s})$ & $h_2(\mathbf{s})$ & $h_3(\mathbf{s})$ \\
+        \midrule
+        000 & 6  & 6  & 6  \\
+        001 & 3  & 3  & 10 \\
+        010 & 3  & 10 & 3  \\
+        011 & 0  & 6  & 6  \\
+        100 & 10 & 3  & 3  \\
+        101 & 6  & 0  & 6  \\
+        110 & 6  & 6  & 0  \\
+        111 & 2  & 2  & 2  \\
+        \bottomrule
+    \end{tabular}
+    \caption{Payoff values for the 3-player quantum Prisoner's Dilemma.}
+    \label{tab:payoffs}
+\end{table}
+
+For general $L$, players are arranged on a ring with pairwise interactions.
+Each player interacts with their two nearest neighbors via a 2-player Prisoner's Dilemma Hamiltonian
+$H^{(2)}$ with payoffs $(R, S, T, P) = (3, 0, 5, 1)$,
+and the total payoff for player $i$ is the average over incident edges:
+\begin{equation}
+    H_i = \frac{1}{2}\left( H^{(2)}_{i, i+1} + H^{(2)}_{i, i-1} \right),
+\end{equation}
+where indices are taken modulo $L$.
+
+\subsection{Matrix product state representation}
+
+For large $L$, storing the full state vector $\ket{\psi} \in (\mathbb{C}^2)^{\otimes L}$ is intractable.
+We represent quantum states as matrix product states (MPS) with open boundary conditions:
+\begin{equation}
+    \ket{\psi} = \sum_{s_1, \ldots, s_L} A_1^{s_1} A_2^{s_2} \cdots A_L^{s_L} \ket{s_1 s_2 \cdots s_L},
+\end{equation}
+where each $A_j^{s_j}$ is a matrix of dimension $\chi_{j-1} \times \chi_j$ with $\chi_0 = \chi_L = 1$.
+The bond dimension $\chi = \max_j \chi_j$ controls the entanglement capacity of the ansatz.
+For $\chi = 1$, the state is a product state (zero entanglement);
+for $\chi = 2^{\lfloor L/2 \rfloor}$, the MPS can represent any state exactly.
+
+In practice, we work with bond dimension $\chi = 2$, which is sufficient to capture
+states with moderate entanglement, including GHZ-type states
+$\ket{\mathrm{GHZ}} = (\ket{0}^{\otimes L} + \ket{1}^{\otimes L})/\sqrt{2}$.
+
+\subsection{Nash equilibrium and exploitability}
+
+A state $\ket{\psi}$ constitutes an $\varepsilon$-Nash equilibrium if no player can increase their payoff
+by more than $\varepsilon$ through a unilateral unitary deviation:
+\begin{equation}
+    \max_{U_i \in \mathrm{SU}(2)} \bra{\psi_i(U_i)} H_i \ket{\psi_i(U_i)} - \bra{\psi} H_i \ket{\psi} < \varepsilon \quad \forall\, i,
+\end{equation}
+where $\ket{\psi_i(U_i)}$ denotes the state with $U_i$ applied only to qubit $i$.
+The left-hand side defines the \emph{exploitability} $\varepsilon_i(\psi)$ of player $i$.
+
+We find Nash equilibria using \emph{simultaneous differential best response dynamics}.
+At each iteration $n$, we compute the gradient of each player's payoff with respect to
+their local unitary:
+\begin{equation}
+    M_i = \pdv{E_i}{U_i} = \tr_{j \neq i}\left[ H_i \ketbra{\psi}{\psi} \right],
+\end{equation}
+where the partial trace is over all qubits except $i$.
+The unitary update is extracted via the SVD of the matrix $\mathbb{I} - \alpha M_i$:
+if $\mathbb{I} - \alpha M_i = Y \Sigma Z^\dagger$, the update is $U_i = Z Y^\dagger$,
+which is the unitary closest to the gradient step in operator norm.
+All players update simultaneously, and the procedure is iterated until
+the total exploitability $\sum_i \varepsilon_i < \varepsilon_{\mathrm{thr}}$.
+
+The exploitability $\varepsilon_i$ is computed by globally optimizing over $\mathrm{SU}(2)$
+using differential evolution,
+ensuring that the reported Nash equilibria are validated against arbitrary (not just infinitesimal) deviations.
+
+\bibliographystyle{unsrt}
+% \bibliography{refs}
+
+\section{Area laws}
+\label{sec:area-laws}
+
+A quantum game is defined by the triple \((\hat{h}_i, G_i, N)\) where $N$ is the number of players. We would like to study the quantum advantage associated with the underlying resource state.
+
+\begin{itemize}
+    \item In the product state orbit, the game is purely classical (with automatic extension to mixed strategies by controlling the probability amplitudes of individual qubits)
+    \item In the volume law cases, we get $\tr (U_i \rho U_i^\dagger \hat{O}) \approx \tr \rho \hat{O}$ for any local observable $\hat{O}$.
+    \item So there might be an optimal entanglement structure for the underlying resource state for the maximal quantum advantage (in the sense of mechanism design).
+\end{itemize}
+
+\subsection{Introducing non-commutativity}
+
+\begin{itemize}
+    \item Product state case: always find a Nash equilibrium irrespective of the payoff Hamiltonians.
+    \item Adding entanglement by doing a multi-qubit unitary: can find NE for random Ising game with \(  \hat{h}_L = \hat{h}_0 + V(g_L), \hat{h}_R = \hat{h}_0 + V(g_R) \), where \( V(g) = g \hat{X}_i \) and we randomly pick $g_L, g_R$ from a distribution.
+    \item This statement breaks down when we consider the random Heisenberg interactions with \(\hat{h}_i = n_x \hat{X}_i \hat{X}_{i+1} + n_y \hat{Y}_i \hat{Y}_{i+1} + n_z \hat{Z}_i \hat{Z}_{i+1}\). (\(n_x^2 + n_y^2 + n_z^2 = 1\) chosen at random). Adding entanglement in the initial states let the interaction dynamics to end up in a limit cycle.
+    \item Note that all games considered so far are translationally invariant, i.e. \(T^\dagger \hat{h}_i T = \hat{h}_i\) 
+\end{itemize}
+
+
+
+\end{document}

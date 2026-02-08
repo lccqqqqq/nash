@@ -767,3 +767,6 @@ test_step_sizes()
 plot_energy_and_exploitability(result_ibr, relative_to_init=False)
 # plot_energy_and_exploitability(result_ori_seq, relative_to_init=False)
 # plot_energy_and_exploitability(result_ori, relative_to_init=False)
+
+#%% Using saved results
+

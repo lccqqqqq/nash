@@ -175,20 +175,22 @@ def get_default_cyclic_players(L: int, Hs: list[np.ndarray] = H_QPD, option: str
         hloc = np.zeros([2] * (2 * L), dtype=dtype)
 
         for neighbor in neighbors:
-            edge = tuple(sorted([site, neighbor]))
-            idx_in_edge = 0 if edge[0] == site else 1
+            # Directed edge: site interacts with neighbor
+            # idx_in_edge: 0 if site is the "left" player (site→neighbor), 1 if "right" (neighbor→site)
+            right_neighbor = (site + 1) % L
+            idx_in_edge = 0 if neighbor == right_neighbor else 1
 
             # Get pairwise Hamiltonian and embed into full L-qubit space
             H_edge = np.eye(2**L, dtype=dtype).reshape([2] * (2 * L))
             H_2site = Hs[idx_in_edge].reshape(2, 2, 2, 2)
 
-            # Contract: place 2-site interaction at positions (edge[0], edge[1])
+            # Contract: place 2-site interaction at positions (site, neighbor)
             # H_edge has indices [phys_0, phys_1, ..., phys_{L-1}, aux_0, aux_1, ..., aux_{L-1}]
-            # We contract auxiliary indices at edge positions with H_2site's physical indices
+            # We contract auxiliary indices at (site, neighbor) with H_2site's physical indices
             H_edge = np.tensordot(H_edge, H_2site,
-                                 axes=([L + edge[0], L + edge[1]], [0, 1]))
+                                 axes=([L + site, L + neighbor], [0, 1]))
             # Move the new auxiliary indices back to their positions
-            H_edge = np.moveaxis(H_edge, [-2, -1], [L + edge[0], L + edge[1]])
+            H_edge = np.moveaxis(H_edge, [-2, -1], [L + site, L + neighbor])
 
             hloc = hloc + H_edge
 

@@ -3,7 +3,9 @@
     "allow": [
       "Bash(python3:*)",
       "Bash(source .venv/bin/activate:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "mcp__notion__notion-search",
+      "mcp__notion__notion-fetch"
     ],
     "deny": [],
     "ask": []

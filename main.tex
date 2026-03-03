@@ -8,6 +8,9 @@
 \usepackage{hyperref}
 \usepackage{cite}
 \usepackage{booktabs}
+\usepackage{subcaption}
+
+\graphicspath{{figures/}}
 
 \title{Area Laws in Quantum Nash Equilibria}
 \author{C. L}
@@ -18,7 +21,17 @@
 \maketitle
 
 \begin{abstract}
-Abstract here.
+We study the entanglement structure of Nash equilibria in multi-player quantum games
+on ring geometries, where players' strategies are local unitaries acting on a shared fiducial state
+represented as a matrix product state (MPS).
+Using simultaneous differential best response dynamics with adaptive learning rate scheduling,
+we numerically compute Nash equilibria for quantum Prisoner's Dilemma games with 3 and 6 players.
+For diagonal (commuting) payoff Hamiltonians, the welfare-optimal Nash equilibrium consistently
+resides on the GHZ orbit, and this robustness persists under the addition of non-commutative perturbations.
+We observe that low bond dimension MPS ($\chi = 2$) suffice to capture the optimal equilibria,
+suggesting an area-law entanglement structure for the best Nash equilibrium.
+We discuss the role of exploitability thresholds and the topology of the Nash variety
+in producing sudden welfare drops during optimization.
 \end{abstract}
 
 \section{Setup}
@@ -130,29 +143,363 @@ The exploitability $\varepsilon_i$ is computed by globally optimizing over $\mat
 using differential evolution,
 ensuring that the reported Nash equilibria are validated against arbitrary (not just infinitesimal) deviations.
 
-\bibliographystyle{unsrt}
-% \bibliography{refs}
+\subsection{Algorithmic refinements}
+\label{sec:algorithm-refinements}
 
-\section{Area laws}
+Several algorithmic improvements were necessary to obtain reliable Nash equilibria
+across a range of system sizes and Hamiltonian types.
+
+\paragraph{Subroutine learning rate scheduling.}
+When Nash equilibria are not found by the differential best response solver,
+the failure is typically due to insufficient learning rates or premature termination,
+rather than the algorithm converging to a non-Nash state.
+We address this by implementing adaptive retry logic in the solver:
+when convergence fails, the subroutine learning rate $\alpha$ is increased
+and the solver is restarted. Analysis of failed runs confirms this diagnosis:
+\begin{itemize}
+    \item At low learning rates ($\alpha = 0.01$), the exploitability decreases but does not
+    reach the threshold within the allotted iterations---a premature termination artifact.
+    \item At moderate learning rates ($\alpha \approx 0.09$), convergence improves significantly.
+    \item If $\alpha$ exceeds a critical threshold ($\alpha \gtrsim 3$),
+    the exploitability exhibits limit cycles and fails to settle,
+    an artifact of overshooting in the best response dynamics.
+    \item An intermediate regime ($\alpha \approx 2$) can produce states with
+    constant payoff but nonzero exploitability---locally stable but globally unstable configurations.
+\end{itemize}
+Note that $\alpha$ does not directly set the step size; it scales the matrix
+$\mathbb{I} - \alpha M_i$ whose SVD yields the unitary update,
+so the effective step size also depends on the gradient magnitude.
+These regimes are illustrated in Figure~\ref{fig:alpha-regimes}.
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{failed_run_alpha001}
+        \caption{$\alpha = 0.01$: premature termination.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{converged_alpha009}
+        \caption{$\alpha = 0.09$: successful convergence.}
+    \end{subfigure}
+    \\[1em]
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{limit_cycle_alpha3}
+        \caption{$\alpha = 3$: limit cycle behavior.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{constant_payoff_alpha2}
+        \caption{$\alpha = 2$: constant payoff, nonzero exploitability.}
+    \end{subfigure}
+    \caption{Effect of the subroutine learning rate $\alpha$ on the convergence
+    of the differential best response solver for 3 players.}
+    \label{fig:alpha-regimes}
+\end{figure}
+
+\paragraph{Fiducial state learning rate and exploitability threshold.}
+The outer optimization loop over the fiducial state $\ket{\psi_0}$ is sensitive
+to the exploitability threshold $\varepsilon_{\mathrm{thr}}$ used in the inner Nash solver.
+At $\varepsilon_{\mathrm{thr}} = 10^{-4}$, the solver may converge to different Nash equilibria
+on the same orbit at successive optimization steps, producing sudden welfare drops (see Section~\ref{sec:welfare-drops}).
+Tightening to $\varepsilon_{\mathrm{thr}} = 10^{-10}$ eliminates these discontinuities
+but reduces the success rate of the inner solver, as some runs fail to converge entirely.
+The combination of tighter thresholds with the adaptive learning rate scheduling resolves this trade-off.
+
+\paragraph{Multiple Nash equilibria per orbit.}
+When the solver fails, an alternative strategy is to perturb the state within the same orbit
+(by applying products of random local unitaries) and re-run the algorithm.
+This keeps optimization running but reveals that multiple Nash equilibria can coexist on the same orbit,
+manifested by jumping payoffs across restarts.
+For the 6-player case, the landscape is particularly complex
+(Figure~\ref{fig:six-player-solver}), with
+the solver requiring up to 20 random restarts to find a valid equilibrium.
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{six_player_alpha04}
+        \caption{$\alpha = 0.4$, 6000 iterations: convergence achieved.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{six_player_alpha006_notconv}
+        \caption{$\alpha = 0.06$, 1000 iterations: not converged.}
+    \end{subfigure}
+    \caption{Solver behavior for the 6-player game at different learning rates.
+    The more complex landscape requires higher learning rates and more iterations.}
+    \label{fig:six-player-solver}
+\end{figure}
+
+\section{Numerical results: diagonal payoff Hamiltonians}
+\label{sec:results-diagonal}
+
+\subsection{Three-player quantum Prisoner's Dilemma}
+
+For the 3-player game with the payoff structure in Table~\ref{tab:payoffs},
+the welfare-optimal Nash equilibrium is found on the GHZ orbit,
+$\ket{\psi_0} \sim (\ket{000} + \ket{111})/\sqrt{2}$.
+The optimization of the fiducial state consistently converges to this orbit
+across multiple random initializations.
+
+Not all runs succeed: Figure~\ref{fig:unsuccessful-3player} shows a case where
+the algorithm converges to a locally stable state (at iteration 8401)
+that has low exploitability by the local criterion but remains globally exploitable.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.7\textwidth]{unsuccessful_3player}
+    \caption{An unsuccessful 3-player run: the solver reports convergence to a Nash state,
+    but the global exploitability remains high, indicating a locally stable
+    but globally unstable strategy configuration.}
+    \label{fig:unsuccessful-3player}
+\end{figure}
+
+\subsection{Six-player results and bond dimension scaling}
+\label{sec:six-player}
+
+For $L = 6$ players with the ring-geometry pairwise Hamiltonian,
+we swept over bond dimensions $\chi \in \{2, 3, 4, 5, 6, 7, 8, 9\}$
+with randomly initialized MPS states.
+Counter-intuitively, higher bond dimensions do not uniformly improve outcomes:
+the best welfare is observed at low $\chi$, while larger $\chi$ runs
+exhibit more frequent welfare drops due to the richer Nash landscape
+(Figure~\ref{fig:chi-comparison}).
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{chi2_welfare}
+        \caption{$\chi = 2$: smooth welfare optimization.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{chi8_welfare}
+        \caption{$\chi = 8$: frequent welfare drops.}
+    \end{subfigure}
+    \caption{Welfare trajectories for 6-player optimization at different bond dimensions.
+    Lower bond dimensions yield smoother optimization landscapes.}
+    \label{fig:chi-comparison}
+\end{figure}
+
+The MPS with bond dimension $\chi = 4$ already captures the full state space for
+$L \leq 5$ qubits without truncation, as the number of MPS parameters exceeds
+the true degrees of freedom of the Hilbert space.
+The GHZ state, describable with $\chi = 2$, remains attainable for all truncations under consideration.
+
+\subsection{Welfare drops and the topology of the Nash variety}
+\label{sec:welfare-drops}
+
+A persistent phenomenon in the fiducial state optimization is the occurrence of sudden welfare drops.
+These drops are robust against:
+\begin{enumerate}
+    \item Changing the gradient calculation to select the maximum-welfare perturbation.
+    \item Adding ridge regularization to the gradient estimator.
+\end{enumerate}
+
+The welfare drops arise because the manifold of Nash equilibria in the pure state space
+does not have consistent topology across different regions (Figure~\ref{fig:welfare-drops}).
+At an $\varepsilon$-approximate Nash equilibrium with $\varepsilon = 10^{-4}$,
+a small perturbation of the fiducial state can cause the inner solver to converge
+to a qualitatively different Nash equilibrium with drastically different payoffs.
+
+\begin{figure}[ht]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{welfare_drop_case_study1}
+        \caption{Welfare trajectory showing sudden drops.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{welfare_drop_case_study2}
+        \caption{Corresponding payoff trajectories.}
+    \end{subfigure}
+    \caption{Case study of sudden welfare drops during fiducial state optimization.
+    The drops are robust against changes to the gradient estimator and regularization.}
+    \label{fig:welfare-drops}
+\end{figure}
+
+The entanglement parameters (bipartite entropies), by contrast, change smoothly across these drops
+(Figure~\ref{fig:entanglement-smooth}).
+This is expected: the orbit is updated continuously, so the entanglement structure varies smoothly
+even when the Nash equilibrium found on that orbit changes discontinuously.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.6\textwidth]{entanglement_params_smooth}
+    \caption{Entanglement parameters evolve smoothly during optimization,
+    even across welfare drops, confirming that the orbit changes continuously.}
+    \label{fig:entanglement-smooth}
+\end{figure}
+
+Gradient diagnostic analysis reveals:
+\begin{itemize}
+    \item The gradient norm increases sharply at larger perturbation strengths $\epsilon$,
+    indicating that large gradients are artifacts of basin-jumping between Nash equilibria.
+    \item The success rate of the inner solver drops significantly at larger $\epsilon$.
+    \item The normalized gradient (welfare change divided by $\epsilon$) varies wildly,
+    confirming that the gradient estimate becomes unreliable when perturbations cross basin boundaries.
+\end{itemize}
+These diagnostics are summarized in Figure~\ref{fig:gradient-diagnostics}.
+The resolution is to reduce the perturbation strength $\epsilon$ such that
+$2\epsilon$ is smaller than the ``bottleneck'' of the connected component in the Nash variety,
+ensuring that the optimization remains on a single continuous branch.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.85\textwidth]{gradient_diagnostics}
+    \caption{Gradient diagnostics for the welfare drop analysis.
+    Top left: gradient norm vs.\ perturbation strength.
+    Top right: solver success rate.
+    Bottom left: mean welfare change.
+    Bottom right: normalized gradient.
+    The sharp increase in gradient norm and drop in success rate at larger $\epsilon$
+    confirm basin-jumping as the cause of welfare drops.}
+    \label{fig:gradient-diagnostics}
+\end{figure}
+
+\section{Area laws and entanglement structure}
 \label{sec:area-laws}
 
-A quantum game is defined by the triple \((\hat{h}_i, G_i, N)\) where $N$ is the number of players. We would like to study the quantum advantage associated with the underlying resource state.
+A quantum game is defined by the triple $(\hat{h}_i, G_i, N)$ where $N$ is the number of players,
+$\hat{h}_i$ are the payoff Hamiltonians, and $G_i$ are the strategy groups.
+We study the quantum advantage associated with the entanglement structure
+of the underlying resource state.
 
 \begin{itemize}
-    \item In the product state orbit, the game is purely classical (with automatic extension to mixed strategies by controlling the probability amplitudes of individual qubits)
-    \item In the volume law cases, we get $\tr (U_i \rho U_i^\dagger \hat{O}) \approx \tr \rho \hat{O}$ for any local observable $\hat{O}$.
-    \item So there might be an optimal entanglement structure for the underlying resource state for the maximal quantum advantage (in the sense of mechanism design).
+    \item In the product state orbit ($\chi = 1$), the game is purely classical,
+    with automatic extension to mixed strategies by controlling the probability amplitudes of individual qubits.
+    \item In the volume-law regime, local unitary invariance implies
+    $\tr(U_i \rho U_i^\dagger \hat{O}) \approx \tr(\rho \hat{O})$
+    for any local observable $\hat{O}$, so players have negligible strategic influence.
+    \item There may therefore exist an optimal entanglement structure
+    for the fiducial state that maximizes the quantum advantage
+    in the sense of mechanism design---neither too little nor too much entanglement.
 \end{itemize}
+
+Our numerical results support this picture:
+the welfare-optimal Nash equilibria for the quantum Prisoner's Dilemma
+consistently reside on the GHZ orbit ($\chi = 2$),
+and higher bond dimensions do not improve the optimal welfare.
+This suggests that the best Nash equilibrium satisfies an area law for entanglement,
+with the optimal resource state having $O(1)$ entanglement entropy across any bipartition.
+
+\section{Non-commutative payoff Hamiltonians}
+\label{sec:non-commutative}
 
 \subsection{Introducing non-commutativity}
 
+To move beyond the diagonal (classical) payoff structure, we consider Hamiltonians
+with non-commuting terms. The key observations, organized by the degree of non-commutativity, are:
+
+\paragraph{Product state regime.}
+For product states, Nash equilibria are always found irrespective of the payoff Hamiltonians.
+The algorithm converges reliably in this regime.
+
+\paragraph{Ising-type perturbations.}
+Adding entanglement via a multi-qubit unitary, one can find Nash equilibria
+for random Ising games with
+\begin{equation}
+    \hat{h}_L = \hat{h}_0 + V(g_L), \quad \hat{h}_R = \hat{h}_0 + V(g_R),
+\end{equation}
+where $V(g) = g\, \hat{X}_i$ and $g_L, g_R$ are drawn from a random distribution.
+
+\paragraph{Heisenberg-type interactions.}
+The existence of Nash equilibria breaks down for random Heisenberg interactions
+\begin{equation}
+    \hat{h}_i = n_x \hat{X}_i \hat{X}_{i+1} + n_y \hat{Y}_i \hat{Y}_{i+1} + n_z \hat{Z}_i \hat{Z}_{i+1},
+\end{equation}
+where $(n_x, n_y, n_z)$ is a random unit vector on $S^2$.
+Adding entanglement in the initial states causes the best response dynamics to end up in limit cycles,
+preventing convergence to a Nash equilibrium.
+
+\paragraph{Remark.}
+All games considered so far are translationally invariant, i.e.,
+$T^\dagger \hat{h}_i T = \hat{h}_i$ where $T$ is the translation operator.
+
+\subsection{Three-player results with non-commutative perturbations}
+
+To introduce non-commutativity gradually, we let $\hat{h}' = \hat{h} + V$
+where $V$ is a random Hermitian matrix with bounded Frobenius norm.
+For $\|V\|_F = 1$, the fiducial state optimization still converges to the GHZ orbit
+(Figure~\ref{fig:noncomm-ghz}),
+suggesting robustness of the GHZ orbit as the welfare-optimal state
+even in the presence of non-commuting perturbations.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.85\textwidth]{noncomm_ghz_robustness}
+    \caption{Fiducial state optimization with non-commutative perturbations
+    ($\|V\|_F = 1$). Compared to the standard (diagonal) QPD runs,
+    the optimization still converges to the GHZ orbit,
+    suggesting robustness of maximal entanglement as the optimal resource state.}
+    \label{fig:noncomm-ghz}
+\end{figure}
+
+The relationship between entanglement parameters and equilibrium welfare
+remains qualitatively the same across different non-commutativity strengths
+(Figure~\ref{fig:noncomm-entanglement}).
+The success rate of the inner Nash solver drops to approximately 60\%,
+but the optimal orbit remains the GHZ orbit when equilibria are found.
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.7\textwidth]{noncomm_entanglement_welfare}
+    \caption{Entanglement parameters vs.\ welfare for Nash equilibria found under
+    different non-commutativity strengths. The relationship is qualitatively invariant.}
+    \label{fig:noncomm-entanglement}
+\end{figure}
+
+The \texttt{compute\_exploitability()} function was modified to handle the expanded strategy space
+arising from non-commuting Hamiltonians,
+where the single-player best response is no longer one-dimensional.
+
+\subsection{Two-player non-commutative games}
+
+For 2-player games, we map out the exploitability landscape
+as a function of the entanglement in the fiducial state (Figure~\ref{fig:twoplayer}):
 \begin{itemize}
-    \item Product state case: always find a Nash equilibrium irrespective of the payoff Hamiltonians.
-    \item Adding entanglement by doing a multi-qubit unitary: can find NE for random Ising game with \(  \hat{h}_L = \hat{h}_0 + V(g_L), \hat{h}_R = \hat{h}_0 + V(g_R) \), where \( V(g) = g \hat{X}_i \) and we randomly pick $g_L, g_R$ from a distribution.
-    \item This statement breaks down when we consider the random Heisenberg interactions with \(\hat{h}_i = n_x \hat{X}_i \hat{X}_{i+1} + n_y \hat{Y}_i \hat{Y}_{i+1} + n_z \hat{Z}_i \hat{Z}_{i+1}\). (\(n_x^2 + n_y^2 + n_z^2 = 1\) chosen at random). Adding entanglement in the initial states let the interaction dynamics to end up in a limit cycle.
-    \item Note that all games considered so far are translationally invariant, i.e. \(T^\dagger \hat{h}_i T = \hat{h}_i\) 
+    \item Local solvers fail to find Nash equilibria once the state
+    has nonzero Schmidt eigenvalues (low-lying entangled orbits).
+    \item Convergence to Nash equilibria is successful in the product state regime.
+    \item Using damped-step best response dynamics destabilizes the optimization,
+    while full-step best response gives correct results.
 \end{itemize}
 
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=0.7\textwidth]{twoplayer_product_state}
+    \caption{Two-player non-commutative game with product states.
+    The algorithm converges successfully in the product state regime,
+    but fails for entangled states with nonzero Schmidt eigenvalues.}
+    \label{fig:twoplayer}
+\end{figure}
 
+Explicit search over the full strategy space confirms that
+the exploitability does not reach zero for entangled states
+with non-commutative payoffs,
+with the minimal exploitability consistent with the local algorithm at approximately $0.01$.
+This suggests a genuine obstruction to Nash equilibria in the entangled regime
+for non-commuting Hamiltonians, rather than a failure of the algorithm.
+
+\subsection{Open questions}
+
+\begin{enumerate}
+    \item Sequential (instead of simultaneous) updates for the best response solver
+    may improve convergence for non-commutative payoffs.
+    \item A differential best response solver without SVD decomposition
+    could avoid the instabilities observed with damped steps.
+    \item Double-oracle methods for expanding subgames may provide
+    a path to equilibria in cases where the current algorithm fails.
+    \item CMA-ES navigation on the exploitability landscape
+    could find minima that local gradient methods miss,
+    though the computational cost (requiring differential evolution subroutine calls
+    for each update) may be prohibitive.
+    \item Testing with completely random payoff Hamiltonians:
+    does the optimal orbit remain the maximally entangled one?
+\end{enumerate}
+
+\bibliographystyle{unsrt}
+% \bibliography{refs}
 
 \end{document}

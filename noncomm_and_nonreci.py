@@ -54,6 +54,5 @@ plot_energy_and_exploitability(result, relative_to_init=False)
 print(result['energy'][-1])
 print(init_state)
 
-#%%
-print(np.real(H[0].reshape(2**L, 2**L)))
-print(np.real(H[1].reshape(2**L, 2**L)))
+#%% Two player games with non-commutativity and non-reciprocity parts
+
